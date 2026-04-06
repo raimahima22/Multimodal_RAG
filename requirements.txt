@@ -1,0 +1,7 @@
+torch
+colpali-engine
+transformers
+langchain
+qdrant-client
+pillow
+python-dotenv

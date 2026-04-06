@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.egg-info/
+*.eggs/
+*.so
+
+# Virtual environments
+venv/
+env/
+rag_env/
+*.venv
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data / embeddings / cache
+embeddings/
+*.faiss
+data/*.h5
+data/*.npz
+*.ckpt
+*.pt
+*.pth
+
+# Colpali / ML model caches
+.cache/
+transformers_cache/
+huggingface/
+torch_cache/
+
+# Secrets / API keys
+.env
+*.key
+*.pem
+
+# Misc
+*.zip
+*.tar.gz
+*.csv
