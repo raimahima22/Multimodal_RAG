@@ -48,3 +48,9 @@ torch_cache/
 *.zip
 *.tar.gz
 *.csv
+
+# ==================== Qdrant Data (Very Important) ====================
+qdrant_db/
+qdrant_storage/
+storage/
+qdrant_data/
