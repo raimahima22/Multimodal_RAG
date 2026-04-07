@@ -15,6 +15,7 @@ class MultimodalIndexer:
         self.device = "cpu" 
         self.collection_name = collection_name
         
+        
         # Consistent with https://huggingface.co/google/siglip-base-patch16-224
         model_id = "google/siglip-base-patch16-224"
         

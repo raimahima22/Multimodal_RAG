@@ -35,7 +35,8 @@ class MultimodalRetriever:
             query_vec = emb_tensor.cpu().numpy()
             
             # Robust flattening – this is what was missing / not working in previous fixes
-            query_vec = np.squeeze(query_vec)               # turns (1, dim) → (dim,)
+            query_vec = np.squeeze(query_vec)    
+                       # turns (1, dim) → (dim,)
             
             # Safety net: if we ever get last_hidden_state (1, seq_len, dim) instead of pooled embedding
             if query_vec.ndim > 1:
@@ -50,7 +51,7 @@ class MultimodalRetriever:
         results = self.indexer.client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec.tolist(),   # ← this is now a proper list[float]
-            limit=top_k
+            limit=top_k,
         ).points
         
         return results
