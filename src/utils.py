@@ -1,5 +1,6 @@
 import base64
 from io import BytesIO
+from PIL import Image
 from pdf2image import convert_from_path
 
 def pdf_to_images(pdf_path):

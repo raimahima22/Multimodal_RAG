@@ -1,11 +1,12 @@
 import torch
 import numpy as np
+from collections import defaultdict
 
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    def search(self, query_text, top_k=1):
+    def search(self, query_text, top_k=15):
         # SigLIP uses the processor to encode text
         inputs = self.indexer.processor(
             text=[query_text], 
@@ -18,7 +19,7 @@ class MultimodalRetriever:
             outputs = self.indexer.model.get_text_features(**inputs)
             print(type(outputs))  # should be <class 'transformers.modeling_outputs.BaseModelOutputWithPooling'>
             
-            # === THE REAL FIX ===
+            
             # BaseModelOutputWithPooling does NOT return a raw tensor.
             # outputs[0] was giving you a (1, dim) tensor → .tolist() became [[...]] → Qdrant validation error.
             # We now:
@@ -54,4 +55,12 @@ class MultimodalRetriever:
             limit=top_k,
         ).points
         
-        return results
+        # return results
+        page_best = defaultdict(lambda: {"score": -1, "point": None})
+        for point in results:
+            key = (point.payload["source"], point.payload.get("page_number"))
+            if point.score > page_best[key]["score"]:
+                page_best[key] = {"score": point.score, "point": point}
+        #sort pages by best patch score
+        sorted_pages = sorted(page_best.values(), key=lambda x:x["score"], reverse=True)
+        return [item["point"] for item in sorted_pages[:5]]

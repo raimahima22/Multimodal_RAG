@@ -31,7 +31,7 @@ def main():
         print(f"\n Searching for: '{query}'")
         
         # Retrieve relevant content
-        hits = retriever.search(query, top_k=3)
+        hits = retriever.search(query, top_k=15)
         
         if hits:
             best_hit = hits[0]
@@ -39,7 +39,7 @@ def main():
             page = best_hit.payload.get('page_number')
             
             print(f" Found relevant match in: {source} (Page {page})")
-            print(f" Relevance Score: {best_hit.score:.4f}\n")
+            # print(f" Relevance Score: {best_hit.score:.4f}\n")
             
             # Generate answer
             print(" Generating Answer...")
