@@ -1,66 +1,61 @@
 import torch
 import numpy as np
+import time
 from collections import defaultdict
+
 
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    def search(self, query_text, top_k=15):
-        # SigLIP uses the processor to encode text
+    def _extract_text_embedding(self, query_text: str):
+        start = time.time()
         inputs = self.indexer.processor(
-            text=[query_text], 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True
+            text=[query_text],
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=64,
         ).to(self.indexer.device)
-        
+
         with torch.no_grad():
             outputs = self.indexer.model.get_text_features(**inputs)
-            print(type(outputs))  # should be <class 'transformers.modeling_outputs.BaseModelOutputWithPooling'>
-            
-            
-            # BaseModelOutputWithPooling does NOT return a raw tensor.
-            # outputs[0] was giving you a (1, dim) tensor → .tolist() became [[...]] → Qdrant validation error.
-            # We now:
-            #   1. Prefer the correct named attribute (pooler_output or text_embeds – exactly what your comment wanted)
-            #   2. Squeeze the batch dimension
-            #   3. Fallback to mean-pooling only if we somehow still have extra dimensions
-            if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-                emb_tensor = outputs.pooler_output          # most common for SigLIP/CLIP text towers
-            elif hasattr(outputs, "text_embeds") and outputs.text_embeds is not None:
-                emb_tensor = outputs.text_embeds            # what your comment was trying to use
-            else:
-                emb_tensor = outputs[0]                     # fallback (what you were using)
-
-            query_vec = emb_tensor.cpu().numpy()
-            
-            # Robust flattening – this is what was missing / not working in previous fixes
-            query_vec = np.squeeze(query_vec)    
-                       # turns (1, dim) → (dim,)
-            
-            # Safety net: if we ever get last_hidden_state (1, seq_len, dim) instead of pooled embedding
-            if query_vec.ndim > 1:
-                query_vec = np.mean(query_vec, axis=0)      # simple mean pooling (you can change to last token if you prefer)
-
-            # Normalise (good practice for cosine similarity / Qdrant)
-            norm = np.linalg.norm(query_vec)
+            embedding = outputs.pooler_output.squeeze(0).cpu().numpy().astype(np.float32)
+            norm = np.linalg.norm(embedding)
             if norm > 0:
-                query_vec = query_vec / norm
+                embedding = embedding / norm
 
-        # Now query_vec is guaranteed to be a flat 1D list of floats
+        embed_time = time.time() - start
+        return embedding, embed_time
+
+    def search(self, query_text: str, top_k: int = 15):
+        start_search = time.time()
+        
+        query_vec, embed_time = self._extract_text_embedding(query_text)
+
+        # Qdrant retrieval
+        retr_start = time.time()
         results = self.indexer.client.query_points(
             collection_name=self.indexer.collection_name,
-            query=query_vec.tolist(),   # ← this is now a proper list[float]
+            query=query_vec.tolist(),
             limit=top_k,
         ).points
-        
-        # return results
-        page_best = defaultdict(lambda: {"score": -1, "point": None})
+        retr_time = time.time() - retr_start
+
+        # Group best per page
+        page_best = defaultdict(lambda: {"score": -1.0, "point": None})
         for point in results:
             key = (point.payload["source"], point.payload.get("page_number"))
             if point.score > page_best[key]["score"]:
                 page_best[key] = {"score": point.score, "point": point}
-        #sort pages by best patch score
-        sorted_pages = sorted(page_best.values(), key=lambda x:x["score"], reverse=True)
-        return [item["point"] for item in sorted_pages[:5]]
+
+        sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
+        top_results = [item["point"] for item in sorted_pages[:5]]
+
+        total_search_time = time.time() - start_search
+
+        print(f"Query embed: {embed_time:.3f}s | Retrieval: {retr_time:.3f}s | Total search: {total_search_time:.3f}s")
+        if top_results:
+            # print(f"   Top score: {top_results[0].score:.4f}")
+
+        return top_results
