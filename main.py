@@ -1,7 +1,14 @@
 import sys
+import gc
+import torch
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
+
+def aggressive_cleanup():
+    
+    gc.collect()
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
 
 def main(force_reindex: bool = False):
@@ -33,14 +40,26 @@ def main(force_reindex: bool = False):
         if query.lower() in ['exit', 'quit', 'q', '']:
             print(" Goodbye!")
             break
-
-        print(f"\n Searching for: '{query}'")
         
-        hits = retriever.search(query, top_k=15)
+        source_input = input("Source (sbc / spd / both): ").strip().lower()
+
+        #map input to the filter
+        if source_input in ["sbc", "sbc.pdf"]:
+            source_filter = "data/sbc.pdf"
+        elif source_input in ["spd", "spd.pdf"]:
+            source_filter = "data/spd.pdf"
+        else:
+            source_filter = None
+        
+        # print(f"\n Searching for: '{query}'")
+        print(f"\n Searching in: {'Both documents' if source_filter is None else source_filter}")
+        
+        hits = retriever.search(query, top_k=15, source_filter=source_filter)
         
         if hits:
             best_hit = hits[0]
-            source = best_hit.payload['source']
+            # source = best_hit.payload['source', 'Unknown']
+            source = best_hit.payload.get('source', 'Unknown')
             page = best_hit.payload.get('page_number', 'N/A')
             
             print(f" Found relevant match in: {source} (Page {page})")
@@ -50,6 +69,7 @@ def main(force_reindex: bool = False):
             
             print(f"\n--- FINAL ANSWER ---\n{answer}\n")
             print("-" * 80 + "\n")
+            aggressive_cleanup()
         else:
             print(" No relevant documents found.\n")
 

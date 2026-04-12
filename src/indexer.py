@@ -4,6 +4,7 @@ import numpy as np
 import time
 from pathlib import Path
 from PIL import Image
+import pytesseract
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -16,6 +17,11 @@ from qdrant_client.models import (
 
 from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 from src.utils import pdf_to_images
+
+def aggressive_cleanup():
+    
+    gc.collect()
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
 
 class MultimodalIndexer:
@@ -35,7 +41,11 @@ class MultimodalIndexer:
         self.model: ColIdefics3 = ColIdefics3.from_pretrained(
             self.model_name,
             torch_dtype=self.torch_dtype,
+            low_cpu_mem_usage=True,
+            device_map="cpu"
         ).to(self.device).eval()
+
+        # gc.collect()
 
         self.processor: ColIdefics3Processor = ColIdefics3Processor.from_pretrained(self.model_name)
 
@@ -43,7 +53,7 @@ class MultimodalIndexer:
 
         # self.client = QdrantClient(path="qdrant_db")
         self.local_client = QdrantClient(path="qdrant_db")
-        # self.remote_client = QdrantClient(url="http://localhost:6333")
+        self.remote_client = QdrantClient(url="http://localhost:6333")
         
 
         if force_recreate:
@@ -53,62 +63,62 @@ class MultimodalIndexer:
 
 
     def _setup_collection(self):
-        # for client in [self.local_client, self.remote_client]:
-        #     if client.collection_exists(self.collection_name):
-        #         print(f"Using existing collection: {self.collection_name}")
-        #         continue
-        #     print("Detecting embedding dimension..")
-        #     with torch.no_grad():
-        #         dummy_img = Image.new("RGB", (224, 224))
-        #         inputs = self.processor.process_images([dummy_img]).to(self.device)
-        #         outputs = self.model(**inputs)
-        #         embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
+        for client in [self.local_client, self.remote_client]:
+            if client.collection_exists(self.collection_name):
+                print(f"Using existing collection: {self.collection_name}")
+                continue
+            print("Detecting embedding dimension..")
+            with torch.no_grad():
+                dummy_img = Image.new("RGB", (224, 224))
+                inputs = self.processor.process_images([dummy_img]).to(self.device)
+                outputs = self.model(**inputs)
+                embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
             
-        #     vectors_config = {
-        #         "image" : VectorParams(
-        #             size = embed_dim,
-        #             distance = Distance.COSINE,
-        #             multivector_config = MultiVectorConfig(
-        #                 comparator=MultiVectorComparator.MAX_SIM
-        #             )
-        #         )
-        #     }
-        #     client.create_collection(
-        #         collection_name = self.collection_name,
-        #         vectors_config = vectors_config
-        #     )
-        #     print("Collections ready in both local and server.")
-
-        if self.local_client.collection_exists(self.collection_name):
-            print(f" Using existing collection: {self.collection_name}")
-            print(self.local_client.get_collection(self.collection_name))
-            return
-
-        # Detect embedding dimension
-        print(" Detecting embedding dimension...")
-        with torch.no_grad():
-            dummy_img = Image.new("RGB", (224, 224))
-            inputs = self.processor.process_images([dummy_img]).to(self.device)
-            outputs = self.model(**inputs)
-            embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
-
-        print(f"Embedding dim: {embed_dim}")
-
-        vectors_config = {
-            "image": VectorParams(
-                size=embed_dim,
-                distance=Distance.COSINE,
-                multivector_config=MultiVectorConfig(
-                    comparator=MultiVectorComparator.MAX_SIM
+            vectors_config = {
+                "image" : VectorParams(
+                    size = embed_dim,
+                    distance = Distance.COSINE,
+                    multivector_config = MultiVectorConfig(
+                        comparator=MultiVectorComparator.MAX_SIM
+                    )
                 )
+            }
+            client.create_collection(
+                collection_name = self.collection_name,
+                vectors_config = vectors_config
             )
-        }
+            print("Collections ready in both local and server.")
 
-        self.local_client.create_collection(
-            collection_name=self.collection_name,
-            vectors_config=vectors_config
-        )
-        print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
+        # if self.local_client.collection_exists(self.collection_name):
+        #     print(f" Using existing collection: {self.collection_name}")
+        #     print(self.local_client.get_collection(self.collection_name))
+        #     return
+
+        # # Detect embedding dimension
+        # print(" Detecting embedding dimension...")
+        # with torch.no_grad():
+        #     dummy_img = Image.new("RGB", (224, 224))
+        #     inputs = self.processor.process_images([dummy_img]).to(self.device)
+        #     outputs = self.model(**inputs)
+        #     embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
+
+        # print(f"Embedding dim: {embed_dim}")
+
+        # vectors_config = {
+        #     "image": VectorParams(
+        #         size=embed_dim,
+        #         distance=Distance.COSINE,
+        #         multivector_config=MultiVectorConfig(
+        #             comparator=MultiVectorComparator.MAX_SIM
+        #         )
+        #     )
+        # }
+
+        # self.local_client.create_collection(
+        #     collection_name=self.collection_name,
+        #     vectors_config=vectors_config
+        # )
+        # print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
     def _recreate_collection(self):
         if self.local_client.collection_exists(self.collection_name):
@@ -152,6 +162,10 @@ class MultimodalIndexer:
 
         print(f"  → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
         return embeddings
+
+        del inputs, outputs
+        aggressive_cleanup()
+        gc.collect()
 
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
@@ -197,15 +211,15 @@ class MultimodalIndexer:
                 points=points,
                 wait=True
             )
-            # self.remote_client.upsert(
-            #     collection_name=self.collection_name,
-            #     points=points,
-            #     wait=True
-            # )
+            self.remote_client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+                wait=True
+            )
 
         page_time = time.time() - start_page
         print(f"Page {page_num} completed: {page_time:.2f}s ")
-        gc.collect()
+        aggressive_cleanup()
         return page_time
 
     def index_document(self, pdf_path: str):
@@ -220,6 +234,7 @@ class MultimodalIndexer:
 
         doc_time = time.time() - start_doc
         print(f"Finished PDF: {pdf_path} | Total: {doc_time:.2f}s | Avg/page: {doc_time/len(images):.2f}s\n")
+        aggressive_cleanup()
         return doc_time
 
     def index_image(self, image_path: str):
@@ -227,6 +242,7 @@ class MultimodalIndexer:
         img = Image.open(image_path).convert("RGB")
         self._process_and_upsert(img, image_path, 0)
         total_time = time.time() - start
+        aggressive_cleanup()
         print(f"Indexed image: {image_path} | Time: {total_time:.2f}s\n")
 
     def index_all_data(self, data_dir: str = "data"):
@@ -242,6 +258,7 @@ class MultimodalIndexer:
                     self.index_image(str(file_path))
 
         total_index_time = time.time() - start_total
+        aggressive_cleanup()
         print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
 
     

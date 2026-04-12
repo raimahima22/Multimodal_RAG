@@ -3,44 +3,65 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from src.utils import pil_to_base64, pdf_to_images
 import os
+import torch
 import time
 import easyocr
+import gc
+import pytesseract
 import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
 
 load_dotenv()
+def aggressive_cleanup():
+    
+    gc.collect()
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
 
 class MultimodalGenerator:
     def __init__(self):
-        # self.llm = ChatGroq(
-        #     model_name="meta-llama/llama-4-scout-17b-16e-instruct",
-        #     groq_api_key=os.environ.get("GROQ_API_KEY"),
-        #     temperature=0.2,      # Lowered slightly for more factual answers
-        #     max_tokens=1024,
-        # )
-        self.llm = ChatOpenAI(
-            model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
-            openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
-            openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.2,
+        self.llm = ChatGroq(
+            model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+            groq_api_key=os.environ.get("GROQ_API_KEY"),
+            temperature=0.2,      # Lowered slightly for more factual answers
             max_tokens=1024,
-            
         )
+        # self.llm = ChatOpenAI(
+        #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
+        #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
+        #     openai_api_base="https://openrouter.ai/api/v1",
+        #     temperature=0.2,
+        #     max_tokens=1024,
+            
+        # )
 
-        self.reader = easyocr.Reader(['en'], gpu=False)
+        # self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory="easyocr_models")
     
-    def _extract_text(self, image: Image.Image) -> str:
-        image=image.convert("RGB")
-        img = np.array(image)
-        results = self.reader.readtext(img)
+    # def _extract_text(self, image: Image.Image) -> str:
+    #     image=image.convert("RGB")
+    #     img = np.array(image)
+    #     results = self.reader.readtext(img)
 
-        texts = [r[1] for r in results]
-        return "\n".join(texts)
+    #     texts = [r[1] for r in results]
+    #     del img, results
+    #     gc.collect()
+    
+    #     return "\n".join(texts)
+    def _extract_text(self, image: Image.Image) -> str:
+        try:
+            text = pytesseract.image_to_string(
+                image.convert("RGB"),
+                config='--psm 6'   # assume uniform block of text
+            )
+            return text.strip()
+        finally:
+            aggressive_cleanup()
+    
 
 
     def generate_answer(self, query, retrieved_point):
+        
         start_gen = time.time()
         source = retrieved_point.payload['source']
         page_num = retrieved_point.payload.get('page_number')
@@ -115,4 +136,8 @@ If the answer is not present, clearly say so.
         response = self.llm.invoke([message])
         gen_time = time.time() - start_gen
         print(f"Answer generation time: {gen_time:.2f} seconds")
+        aggressive_cleanup()
         return response.content
+
+      
+        
