@@ -36,7 +36,7 @@ class MultimodalGenerator:
             
         # )
 
-    self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
+        self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
     
     def _extract_text(self, image: Image.Image) -> str:
         image=image.convert("RGB")
