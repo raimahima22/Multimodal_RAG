@@ -69,7 +69,7 @@ class MultimodalIndexer:
                 continue
             print("Detecting embedding dimension..")
             with torch.no_grad():
-                dummy_img = Image.new("RGB", (224, 224))
+                dummy_img = Image.new("RGB", (224, 224)) #creating dummy input only for shape detection
                 inputs = self.processor.process_images([dummy_img]).to(self.device)
                 outputs = self.model(**inputs)
                 embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
@@ -120,11 +120,7 @@ class MultimodalIndexer:
         # )
         # print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
-    def _recreate_collection(self):
-        if self.local_client.collection_exists(self.collection_name):
-            self.local_client.delete_collection(self.collection_name)
-            print(f"Deleted existing collection: {self.collection_name}")
-        self._setup_collection()
+    
 
     def is_collection_empty(self) -> bool:
         if not self.local_client.collection_exists(self.collection_name):
@@ -147,7 +143,7 @@ class MultimodalIndexer:
         start = time.time()
         pil_img = pil_img.convert("RGB")
 
-        inputs = self.processor.process_images([pil_img]).to(self.device)
+        inputs = self.processor.process_images([pil_img]).to(self.device) #preprocess image
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -161,11 +157,12 @@ class MultimodalIndexer:
             embeddings = embeddings.cpu().numpy().astype(np.float32)
 
         print(f"  → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
-        return embeddings
+        
 
         del inputs, outputs
         aggressive_cleanup()
         gc.collect()
+        return embeddings
 
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
@@ -173,7 +170,7 @@ class MultimodalIndexer:
         points = []
 
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
-        if y_coords and y_coords[-1] + self.chunk_size < h:
+        if y_coords and y_coords[-1] + self.chunk_size < h: #last patch always covers bottom of image
             y_coords.append(h - self.chunk_size)
 
         x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
@@ -183,13 +180,13 @@ class MultimodalIndexer:
         y_coords = sorted(set(y_coords))
         x_coords = sorted(set(x_coords))
 
-        for y in y_coords:
+        for y in y_coords: #creates a grid over the image (patch-extraction loop)
             for x in x_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
                 multi_vector = self._extract_image_embeddings(patch)
 
                 point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
-
+                #create qdrant point
                 points.append(
                     PointStruct(
                         id=point_id,
@@ -211,11 +208,11 @@ class MultimodalIndexer:
                 points=points,
                 wait=True
             )
-            self.remote_client.upsert(
-                collection_name=self.collection_name,
-                points=points,
-                wait=True
-            )
+            # self.remote_client.upsert(
+            #     collection_name=self.collection_name,
+            #     points=points,
+            #     wait=True
+            # )
 
         page_time = time.time() - start_page
         print(f"Page {page_num} completed: {page_time:.2f}s ")
@@ -252,10 +249,10 @@ class MultimodalIndexer:
         data_path = Path(data_dir)
         for file_path in data_path.rglob("*"):
             if file_path.suffix.lower() in [".pdf", ".jpg", ".jpeg", ".png"]:
-                if file_path.suffix.lower() == ".pdf":
+                if file_path.suffix.lower() == ".pdf": #if pdf use document pipeline
                     self.index_document(str(file_path))
                 else:
-                    self.index_image(str(file_path))
+                    self.index_image(str(file_path)) #use image pipeline if image
 
         total_index_time = time.time() - start_total
         aggressive_cleanup()

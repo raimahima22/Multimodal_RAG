@@ -24,7 +24,7 @@ class MultimodalGenerator:
         self.llm = ChatGroq(
             model_name="meta-llama/llama-4-scout-17b-16e-instruct",
             groq_api_key=os.environ.get("GROQ_API_KEY"),
-            temperature=0.2,      # Lowered slightly for more factual answers
+            temperature=0.2,      # Lower for more factual answers
             max_tokens=1024,
         )
         # self.llm = ChatOpenAI(
