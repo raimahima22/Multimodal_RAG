@@ -15,7 +15,8 @@ from qdrant_client.models import (
     MultiVectorComparator,
 )
 
-from colpali_engine.models import ColIdefics3, ColIdefics3Processor
+# from colpali_engine.models import ColIdefics3, ColIdefics3Processor
+from transformers import AutoModel, AutoProcessor
 from src.utils import pdf_to_images
 
 def aggressive_cleanup():
@@ -26,34 +27,46 @@ def aggressive_cleanup():
 
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
-        self.device = "cpu"
-        self.torch_dtype = torch.float32
+        # self.device = "cpu"
+        # self.torch_dtype = torch.float32
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.collection_name = collection_name
-        self.model_name = "vidore/colSmol-500M"
+        # self.model_name = "vidore/colSmol-500M"
+        self.model_name = "TomoroAI/tomoro-colqwen3-embed-4b"
 
-        self.chunk_size = 512
-        self.overlap = 128
+        self.chunk_size = 384
+        self.overlap = 96
         self.stride = self.chunk_size - self.overlap
 
-        print(f"Loading colSmol-500M on CPU → {self.model_name}")
+        print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
-        self.model: ColIdefics3 = ColIdefics3.from_pretrained(
+        # self.model: ColIdefics3 = ColIdefics3.from_pretrained(
+        #     self.model_name,
+        #     torch_dtype=self.torch_dtype,
+        #     low_cpu_mem_usage=True,
+        #     device_map="cpu"
+        # ).to(self.device).eval()
+        self.model = AutoModel.from_pretrained(
             self.model_name,
             torch_dtype=self.torch_dtype,
-            low_cpu_mem_usage=True,
-            device_map="cpu"
+            trust_remote_code=True
         ).to(self.device).eval()
 
-        # gc.collect()
 
-        self.processor: ColIdefics3Processor = ColIdefics3Processor.from_pretrained(self.model_name)
+        # self.processor: ColIdefics3Processor = ColIdefics3Processor.from_pretrained(self.model_name)
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name,
+            trust_remote_code=True
+        )
 
-        print("colSmol-500M model and processor loaded successfully.")
+        print("Model and processor loaded successfully.")
 
         # self.client = QdrantClient(path="qdrant_db")
-        self.local_client = QdrantClient(path="qdrant_db")
-        self.remote_client = QdrantClient(url="http://localhost:6333")
+        # self.local_client = QdrantClient(path="qdrant_db")
+        self.local_client = QdrantClient(":memory:")
+        # self.remote_client = QdrantClient(url="http://localhost:6333")
         
 
         if force_recreate:
@@ -63,62 +76,62 @@ class MultimodalIndexer:
 
 
     def _setup_collection(self):
-        for client in [self.local_client, self.remote_client]:
-            if client.collection_exists(self.collection_name):
-                print(f"Using existing collection: {self.collection_name}")
-                continue
-            print("Detecting embedding dimension..")
-            with torch.no_grad():
-                dummy_img = Image.new("RGB", (224, 224)) #creating dummy input only for shape detection
-                inputs = self.processor.process_images([dummy_img]).to(self.device)
-                outputs = self.model(**inputs)
-                embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
+        # for client in [self.local_client, self.remote_client]:
+        #     if client.collection_exists(self.collection_name):
+        #         print(f"Using existing collection: {self.collection_name}")
+        #         continue
+        #     print("Detecting embedding dimension..")
+        #     with torch.no_grad():
+        #         dummy_img = Image.new("RGB", (224, 224)) #creating dummy input only for shape detection
+        #         inputs = self.processor.process_images([dummy_img]).to(self.device)
+        #         outputs = self.model(**inputs)
+        #         embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
             
-            vectors_config = {
-                "image" : VectorParams(
-                    size = embed_dim,
-                    distance = Distance.COSINE,
-                    multivector_config = MultiVectorConfig(
-                        comparator=MultiVectorComparator.MAX_SIM
-                    )
-                )
-            }
-            client.create_collection(
-                collection_name = self.collection_name,
-                vectors_config = vectors_config
-            )
-            print("Collections ready in both local and server.")
-
-        # if self.local_client.collection_exists(self.collection_name):
-        #     print(f" Using existing collection: {self.collection_name}")
-        #     print(self.local_client.get_collection(self.collection_name))
-        #     return
-
-        # # Detect embedding dimension
-        # print(" Detecting embedding dimension...")
-        # with torch.no_grad():
-        #     dummy_img = Image.new("RGB", (224, 224))
-        #     inputs = self.processor.process_images([dummy_img]).to(self.device)
-        #     outputs = self.model(**inputs)
-        #     embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
-
-        # print(f"Embedding dim: {embed_dim}")
-
-        # vectors_config = {
-        #     "image": VectorParams(
-        #         size=embed_dim,
-        #         distance=Distance.COSINE,
-        #         multivector_config=MultiVectorConfig(
-        #             comparator=MultiVectorComparator.MAX_SIM
+        #     vectors_config = {
+        #         "image" : VectorParams(
+        #             size = embed_dim,
+        #             distance = Distance.COSINE,
+        #             multivector_config = MultiVectorConfig(
+        #                 comparator=MultiVectorComparator.MAX_SIM
+        #             )
         #         )
+        #     }
+        #     client.create_collection(
+        #         collection_name = self.collection_name,
+        #         vectors_config = vectors_config
         #     )
-        # }
+        #     print("Collections ready in both local and server.")
 
-        # self.local_client.create_collection(
-        #     collection_name=self.collection_name,
-        #     vectors_config=vectors_config
-        # )
-        # print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
+        if self.local_client.collection_exists(self.collection_name):
+            print(f" Using existing collection: {self.collection_name}")
+            print(self.local_client.get_collection(self.collection_name))
+            return
+
+        # Detect embedding dimension
+        print(" Detecting embedding dimension...")
+        with torch.no_grad():
+            dummy_img = Image.new("RGB", (224, 224))
+            inputs = self.processor.process_images([dummy_img]).to(self.device)
+            outputs = self.model(**inputs)
+            embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
+
+        print(f"Embedding dim: {embed_dim}")
+
+        vectors_config = {
+            "image": VectorParams(
+                size=embed_dim,
+                distance=Distance.COSINE,
+                multivector_config=MultiVectorConfig(
+                    comparator=MultiVectorComparator.MAX_SIM
+                )
+            )
+        }
+
+        self.local_client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config=vectors_config
+        )
+        print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
     
 

@@ -19,6 +19,11 @@ def main(force_reindex: bool = False):
     retriever = MultimodalRetriever(indexer)
     generator = MultimodalGenerator()
 
+    print("Warming up model...")
+
+    _ = retriever._extract_text_embedding("warmup query")
+    print("Ready!")
+
     # Smart Indexing 
     print("--- Phase 1: Checking Index ---")
     
@@ -41,7 +46,13 @@ def main(force_reindex: bool = False):
             print(" Goodbye!")
             break
         
-        source_input = input("Source (sbc / spd ): ").strip().lower()
+        # source_input = input("Source (sbc / spd ): ").strip().lower()
+        source_map = {
+            "sbc": "data/sbc.pdf",
+            "spd": "data/spd.pdf"
+        }
+
+        source_filter = source_map.get(source_input, None)
 
         #map input to the filter
         if source_input in ["sbc", "sbc.pdf"]:

@@ -36,27 +36,27 @@ class MultimodalGenerator:
             
         # )
 
-        # self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory="easyocr_models")
+    self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
     
-    # def _extract_text(self, image: Image.Image) -> str:
-    #     image=image.convert("RGB")
-    #     img = np.array(image)
-    #     results = self.reader.readtext(img)
-
-    #     texts = [r[1] for r in results]
-    #     del img, results
-    #     gc.collect()
-    
-    #     return "\n".join(texts)
     def _extract_text(self, image: Image.Image) -> str:
-        try:
-            text = pytesseract.image_to_string(
-                image.convert("RGB"),
-                config='--psm 6'   # assume uniform block of text
-            )
-            return text.strip()
-        finally:
-            aggressive_cleanup()
+        image=image.convert("RGB")
+        img = np.array(image)
+        results = self.reader.readtext(img)
+
+        texts = [r[1] for r in results]
+        del img, results
+        gc.collect()
+    
+        return "\n".join(texts)
+    # def _extract_text(self, image: Image.Image) -> str:
+    #     try:
+    #         text = pytesseract.image_to_string(
+    #             image.convert("RGB"),
+    #             config='--psm 6'   # assume uniform block of text
+    #         )
+    #         return text.strip()
+    #     finally:
+    #         aggressive_cleanup()
     
 
 

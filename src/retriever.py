@@ -22,6 +22,7 @@ class MultimodalRetriever:
         # tokenize and preprocess text
         inputs = self.indexer.processor(
             text=[query_text],
+            images=[None],
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -40,20 +41,25 @@ class MultimodalRetriever:
             elif hasattr(outputs, "last_hidden_state"):
                 last_hidden = outputs.last_hidden_state[0]  # (seq_len, hidden_size)
                 embedding = last_hidden  # Use all tokens (better for late interaction)
+            elif isinstance(outputs, tuple):
+                embedding = outputs[0][0]
 
-            elif isinstance(outputs, torch.Tensor):
-                if outputs.dim() == 3:   # (batch, seq_len, dim) → all tokens
-                    embedding = outputs[0]
-                elif outputs.dim() == 2:
-                    # Fallback: treat as single vector but wrap in list 
-                    embedding = outputs[0].unsqueeze(0)
-                else:
-                    raise ValueError(f"Unexpected output tensor shape: {outputs.shape}")
             else:
-                raise AttributeError(
-                    f"Model output has neither 'text_embeds' nor 'last_hidden_state'. "
-                    f"Got type: {type(outputs)}"
-                )
+               raise ValueError(f"Unexpected output format: {type(outputs)}")
+
+            # elif isinstance(outputs, torch.Tensor):
+            #     if outputs.dim() == 3:   # (batch, seq_len, dim) → all tokens
+            #         embedding = outputs[0]
+            #     elif outputs.dim() == 2:
+            #         # Fallback: treat as single vector but wrap in list 
+            #         embedding = outputs[0].unsqueeze(0)
+            #     else:
+            #         raise ValueError(f"Unexpected output tensor shape: {outputs.shape}")
+            # else:
+            #     raise AttributeError(
+            #         f"Model output has neither 'text_embeds' nor 'last_hidden_state'. "
+            #         f"Got type: {type(outputs)}"
+            #     )
 
             # Move to CPU and convert to list of numpy vectors
             embedding = embedding.cpu().numpy().astype(np.float32)
