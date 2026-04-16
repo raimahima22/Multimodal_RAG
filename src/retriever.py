@@ -33,13 +33,25 @@ class MultimodalRetriever:
         with torch.no_grad():
             outputs = self.indexer.model(**inputs)
 
+            def to_numpy(tensor):
+                return tensor.detach().to(torch.float32).cpu().numpy()
+
             # ColQwen2.5 / colpali-engine usually returns .embeddings
             if isinstance(outputs, torch.Tensor):
-                embedding = outputs[0].cpu().numpy().astype(np.float32)         # (num_tokens, embed_dim)
+                embedding = to_numpy(outputs[0])         # (num_tokens, embed_dim)
             elif hasattr(outputs, "query_embeddings"):
-                embedding = outputs.query_embeddings[0].cpu().numpy().astype(np.float32)
+                embedding = to_numpy(outputs.query_embeddings[0])
             elif hasattr(outputs, "last_hidden_state"):
-                embedding = outputs.last_hidden_state[0].cpu().numpy().astype(np.float32)
+                embedding = to_numpy(outputs.last_hidden_state[0])
+             # Case 4: fallback (some models return dict-like outputs)
+            elif isinstance(outputs, dict):
+                if "query_embeddings" in outputs:
+                    embedding = to_numpy(outputs["query_embeddings"][0])
+                elif "last_hidden_state" in outputs:
+                    embedding = to_numpy(outputs["last_hidden_state"][0])
+                else:
+                    raise ValueError(f"Unknown dict output keys: {outputs.keys()}")
+
             else:
                 raise ValueError(f"Unknown output format: {type(outputs)}")
 
