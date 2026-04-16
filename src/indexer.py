@@ -4,6 +4,7 @@ import numpy as np
 import time
 from pathlib import Path
 from PIL import Image
+import shutil
 import pytesseract
 import re, sys
 from qdrant_client import QdrantClient
@@ -24,52 +25,7 @@ def aggressive_cleanup():
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-def patch_colqwen3_config():
-    cache_dir = Path.home() / ".cache" / "huggingface" / "modules" / "transformers_modules"
-    for config_file in cache_dir.rglob("configuration_colqwen3.py"):
-        text = config_file.read_text()
-        
-        # Add field import
-        if "from dataclasses import" not in text:
-            text = "from dataclasses import field\n" + text
-        elif "field" not in text:
-            text = text.replace("from dataclasses import", "from dataclasses import field,")
 
-        # ← FIXED regex: handles dict[str, Any] = {} style annotations
-        text = re.sub(
-            r'(\w+)\s*:\s*dict(\[.*?\])?\s*=\s*\{\}',
-            r'\1: dict\2 = field(default_factory=dict)',
-            text
-        )
-        text = re.sub(
-            r'(\w+)\s*:\s*list(\[.*?\])?\s*=\s*\[\]',
-            r'\1: list\2 = field(default_factory=list)',
-            text
-        )
-
-        # Evict from Python module cache
-        keys_to_delete = [k for k in sys.modules if "colqwen3" in k.lower() or "tomoro" in k.lower()]
-        for k in keys_to_delete:
-            del sys.modules[k]
-
-        # Clear transformers dynamic module cache
-        try:
-            from transformers.dynamic_module_utils import _CACHED_MODULES
-            _CACHED_MODULES.clear()
-        except (ImportError, AttributeError):
-            pass
-
-        config_file.write_text(text)
-        print(f"Patched: {config_file}")
-
-        # Verify the fix was actually applied
-        verify = config_file.read_text()
-        if "default_factory" in verify:
-            print(f" Verified: default_factory found in {config_file.name}")
-        else:
-            print(f" WARNING: patch did not apply correctly to {config_file.name}")
-
-# patch_colqwen3_config()
 
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
@@ -87,13 +43,14 @@ class MultimodalIndexer:
 
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
+        self._fix_colqwen3_config()
 
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id=self.model_name,
-            ignore_patterns=["*.bin", "*.safetensors", "*.pt", "*.gguf"]
-        )
-        patch_colqwen3_config()  # fix mutable default before model loads
+        # from huggingface_hub import snapshot_download
+        # snapshot_download(
+        #     repo_id=self.model_name,
+        #     ignore_patterns=["*.bin", "*.safetensors", "*.pt", "*.gguf"]
+        # )
+        # patch_colqwen3_config()  
 
         # self.model: ColIdefics3 = ColIdefics3.from_pretrained(
         #     self.model_name,
@@ -126,6 +83,50 @@ class MultimodalIndexer:
             self._recreate_collection()
         else:
             self._setup_collection()
+        def _fix_colqwen3_config(self):
+        """Automatically fixes the mutable default error and clears cache"""
+                import shutil
+                from huggingface_hub import hf_hub_download
+                from dataclasses import field
+
+                print(" Fixing ColQwen3 config and clearing cache...")
+
+                try:
+            # Force download fresh config
+                   config_path = hf_hub_download(
+                       repo_id=self.model_name,
+                       filename="configuration_colqwen3.py",
+                       force_download=True
+                    )
+
+            # Read and fix
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                       content = f.read()
+
+            # Fix the problematic line (handles multiple possible versions)
+                    content = re.sub(
+                      r'sub_configs\s*:\s*dict.*?=.*?\n',
+                      'sub_configs: dict = field(default_factory=dict)\n',
+                      content
+                    )
+
+            # Add import if missing
+                    if "from dataclasses import field" not in content:
+                        content = "from dataclasses import field\n" + content
+
+            # Write back the fixed config
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                         f.write(content)
+
+                    print(" Config file patched successfully!")
+
+                except Exception as e:
+                    print(f" Config patch warning: {e}")
+
+        # Clear old cached modules
+                shutil.rmtree("/root/.cache/huggingface/modules/transformers_modules/TomoroAI", 
+                               ignore_errors=True)
+                print(" Transformer module cache cleared!")
 
 
     def _setup_collection(self):
