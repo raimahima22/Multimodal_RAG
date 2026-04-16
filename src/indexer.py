@@ -8,6 +8,7 @@ import shutil
 import pytesseract
 import re
 import sys
+from transformers.utils.import_utils import is_flash_attn_2_available
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
