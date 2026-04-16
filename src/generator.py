@@ -78,20 +78,20 @@ class MultimodalGenerator:
             source = point.payload['source']
             page_num = point.payload.get('page_number')
 
-        if str(source).lower().endswith('.pdf'):
-            imgs = pdf_to_images(source)
-            img = imgs[page_num]
-        else:
-            img = Image.open(source)
+            if str(source).lower().endswith('.pdf'):
+                pages = pdf_to_images(source)
+                page_img = imgs[page_num]
+            else:
+                page_img = Image.open(source)
 
-        images.append(img)
+            images.append(page_img)
 
-        extracted_text = self._extract_text(img)
-        texts.append(extracted_text)
+            extracted_text = self._extract_text(img)
+            texts.append(extracted_text)
         combined_text = "\n\n---\n\n".join(texts[:5])
 
 
-        b64_image = pil_to_base64(target_image)
+        # b64_image = pil_to_base64(target_image)
 
 #         message = HumanMessage(
 #             content=[
@@ -109,6 +109,15 @@ class MultimodalGenerator:
 #                 }
 #             ]
 #         )
+        image_messages = [
+            {
+                "type": "image_url",
+                "image_url":{
+                    "url": f"data:image/jpeg;base64,{pil_to_base64(img)}"
+                }
+            }
+            for img in images[:5]
+        ]
         message = HumanMessage(
             content=[
                 {
@@ -134,7 +143,8 @@ class MultimodalGenerator:
         If the answer is not present, say:
         "Answer not found in provided documents."
         """
-               }
+               },
+               *image_messages
             ]
         )
 
