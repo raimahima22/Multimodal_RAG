@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from PIL import Image
 import pytesseract
-import re
+import re, sys
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -28,28 +28,46 @@ def patch_colqwen3_config():
     cache_dir = Path.home() / ".cache" / "huggingface" / "modules" / "transformers_modules"
     for config_file in cache_dir.rglob("configuration_colqwen3.py"):
         text = config_file.read_text()
-        if "default_factory" in text:
-            print(f"Already patched: {config_file}")
-            return
+        
         # Add field import
         if "from dataclasses import" not in text:
             text = "from dataclasses import field\n" + text
         elif "field" not in text:
             text = text.replace("from dataclasses import", "from dataclasses import field,")
-        # Fix all mutable dict defaults
+
+        # ← FIXED regex: handles dict[str, Any] = {} style annotations
         text = re.sub(
-            r'(\w+)\s*:\s*dict\s*=\s*\{\}',
-            r'\1: dict = field(default_factory=dict)',
+            r'(\w+)\s*:\s*dict(\[.*?\])?\s*=\s*\{\}',
+            r'\1: dict\2 = field(default_factory=dict)',
             text
         )
-        # Fix all mutable list defaults too (in case there are any)
         text = re.sub(
-            r'(\w+)\s*:\s*list\s*=\s*\[\]',
-            r'\1: list = field(default_factory=list)',
+            r'(\w+)\s*:\s*list(\[.*?\])?\s*=\s*\[\]',
+            r'\1: list\2 = field(default_factory=list)',
             text
         )
+
+        # Evict from Python module cache
+        keys_to_delete = [k for k in sys.modules if "colqwen3" in k.lower() or "tomoro" in k.lower()]
+        for k in keys_to_delete:
+            del sys.modules[k]
+
+        # Clear transformers dynamic module cache
+        try:
+            from transformers.dynamic_module_utils import _CACHED_MODULES
+            _CACHED_MODULES.clear()
+        except (ImportError, AttributeError):
+            pass
+
         config_file.write_text(text)
         print(f"Patched: {config_file}")
+
+        # Verify the fix was actually applied
+        verify = config_file.read_text()
+        if "default_factory" in verify:
+            print(f" Verified: default_factory found in {config_file.name}")
+        else:
+            print(f" WARNING: patch did not apply correctly to {config_file.name}")
 
 # patch_colqwen3_config()
 
