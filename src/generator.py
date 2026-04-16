@@ -7,7 +7,7 @@ import torch
 import time
 import easyocr
 import gc
-import pytesseract
+# import pytesseract
 import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
