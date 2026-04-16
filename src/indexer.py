@@ -29,9 +29,9 @@ def aggressive_cleanup():
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
         self.collection_name = collection_name
-        self.model_name = "TomoroAI/tomoro-colqwen3-embed-4b"
+        self.model_name = "vidore/colqwen2.5-v0.2"
 
         self.chunk_size = 384
         self.overlap = 96
@@ -50,7 +50,7 @@ class MultimodalIndexer:
             device_map="auto",
             attn_implementation ="flash_attention_2" if torch.cuda.is_available() else None,
     
-        ).to(self.device).eval()
+        ).eval()
 
         self.processor = ColQwen2_5_Processor.from_pretrained(
             self.model_name,
