@@ -11,7 +11,10 @@ def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
+def to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().to(torch.float32).cpu().numpy()
+    return np.asarray(x, dtype=np.float32)
 
 class MultimodalRetriever:
     def __init__(self, indexer):
