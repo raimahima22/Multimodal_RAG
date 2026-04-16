@@ -152,7 +152,7 @@ class MultimodalIndexer:
                 embeddings = outputs[0]
             elif hasattr(outputs, 'image_embeds') and outputs.image_embeds is not None:
                 embeddings = outputs.image_embeds[0]
-             elif hasattr(outputs, 'last_hidden_state'):
+            elif hasattr(outputs, 'last_hidden_state'):
                 embeddings = outputs.last_hidden_state[0]
             else:
                 embeddings = outputs[0]
