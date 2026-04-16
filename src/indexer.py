@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from PIL import Image
 import pytesseract
-
+import re
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -14,7 +14,7 @@ from qdrant_client.models import (
     MultiVectorConfig,
     MultiVectorComparator,
 )
-
+from pathlib import Path
 # from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 from transformers import AutoModel, AutoProcessor
 from src.utils import pdf_to_images
@@ -24,6 +24,34 @@ def aggressive_cleanup():
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
+def patch_colqwen3_config():
+    cache_dir = Path.home() / ".cache" / "huggingface" / "modules" / "transformers_modules"
+    for config_file in cache_dir.rglob("configuration_colqwen3.py"):
+        text = config_file.read_text()
+        if "default_factory" in text:
+            print(f"Already patched: {config_file}")
+            return
+        # Add field import
+        if "from dataclasses import" not in text:
+            text = "from dataclasses import field\n" + text
+        elif "field" not in text:
+            text = text.replace("from dataclasses import", "from dataclasses import field,")
+        # Fix all mutable dict defaults
+        text = re.sub(
+            r'(\w+)\s*:\s*dict\s*=\s*\{\}',
+            r'\1: dict = field(default_factory=dict)',
+            text
+        )
+        # Fix all mutable list defaults too (in case there are any)
+        text = re.sub(
+            r'(\w+)\s*:\s*list\s*=\s*\[\]',
+            r'\1: list = field(default_factory=list)',
+            text
+        )
+        config_file.write_text(text)
+        print(f"Patched: {config_file}")
+
+# patch_colqwen3_config()
 
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
@@ -41,6 +69,13 @@ class MultimodalIndexer:
 
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
+
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=self.model_name,
+            ignore_patterns=["*.bin", "*.safetensors", "*.pt", "*.gguf"]
+        )
+        patch_colqwen3_config()  # fix mutable default before model loads
 
         # self.model: ColIdefics3 = ColIdefics3.from_pretrained(
         #     self.model_name,
@@ -156,7 +191,7 @@ class MultimodalIndexer:
         start = time.time()
         pil_img = pil_img.convert("RGB")
 
-        inputs = self.processor.process_images([pil_img]).to(self.device) #preprocess image
+        inputs = self.processor.process_images([pil_img], return_tensors="pt").to(self.device) #preprocess image
 
         with torch.no_grad():
             outputs = self.model(**inputs)
