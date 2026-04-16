@@ -16,8 +16,8 @@ from qdrant_client.models import (
     MultiVectorConfig,
     MultiVectorComparator,
 )
-from transformers import AutoModel, AutoProcessor
-from src.utils import pdf_to_images
+from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
+from transformers import AutoProcessor
 
 
 def aggressive_cleanup():
@@ -40,17 +40,19 @@ class MultimodalIndexer:
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
-        # Fix config and clear cache before loading model
-        self._fix_colqwen3_config()
+        
 
-        self.model = AutoModel.from_pretrained(
+        self.model = ColQwen2_5.from_pretrained(
             self.model_name,
             torch_dtype=self.torch_dtype,
             trust_remote_code=True,
-            low_cpu_mem_usage=True,
+            # low_cpu_mem_usage=True,
+            device_map="auto",
+            attn_implementation ="flash_attention_2" if torch.cuda.is_available() else None,
+    
         ).to(self.device).eval()
 
-        self.processor = AutoProcessor.from_pretrained(
+        self.processor = ColQwen2_5_Processor.from_pretrained(
             self.model_name,
             trust_remote_code=True
         )
@@ -64,55 +66,7 @@ class MultimodalIndexer:
         else:
             self._setup_collection()
 
-    def _fix_colqwen3_config(self):
-        """Automatically fixes the mutable default error and clears cache"""
-        print("🔧 Fixing ColQwen3 config and clearing cache...")
-
-        try:
-            from huggingface_hub import hf_hub_download
-            from dataclasses import field
-
-            # Force download fresh config
-            config_path = hf_hub_download(
-                repo_id=self.model_name,
-                filename="configuration_colqwen3.py",
-                force_download=True
-            )
-
-            # Read and fix
-            with open(config_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Fix sub_configs mutable default
-            content = re.sub(
-                r'sub_configs\s*:\s*dict.*?=.*?\n',
-                'sub_configs: dict = field(default_factory=dict)\n',
-                content
-            )
-
-            # Add import if missing
-            if "from dataclasses import field" not in content:
-                content = "from dataclasses import field\n" + content
-
-            # Write back the fixed config
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-            print(" Config file patched successfully!")
-
-        except Exception as e:
-            print(f"Config patch warning: {e}")
-
-        # Clear old cached modules
-        shutil.rmtree("/root/.cache/huggingface/modules/transformers_modules/TomoroAI", 
-                      ignore_errors=True)
-        print("Transformer module cache cleared!")
-
-    def _recreate_collection(self):
-        """Helper to recreate collection (add your logic here if needed)"""
-        if self.local_client.collection_exists(self.collection_name):
-            self.local_client.delete_collection(self.collection_name)
-        self._setup_collection()
+   
 
     def _setup_collection(self):
         if self.local_client.collection_exists(self.collection_name):
