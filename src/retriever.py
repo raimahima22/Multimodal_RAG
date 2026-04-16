@@ -24,7 +24,7 @@ class MultimodalRetriever:
         # === IMPORTANT: Use process_queries for ColQwen2.5 ===
         inputs = self.indexer.processor.process_queries(
             [query_text],          # Note: list of strings
-            return_tensors="pt",
+            # return_tensors="pt",
             padding=True,
             truncation=True,
             max_length=512,

@@ -133,7 +133,7 @@ class MultimodalIndexer:
         start = time.time()
         pil_img = pil_img.convert("RGB")
 
-        inputs = self.processor.process_images([pil_img], return_tensors="pt").to(self.device)
+        inputs = self.processor.process_images([pil_img]).to(self.device)
 
         with torch.no_grad():
             outputs = self.model(**inputs)
