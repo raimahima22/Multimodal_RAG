@@ -75,8 +75,8 @@ def main(force_reindex: bool = False):
         if not hits:
             return "No relevant documents found."
 
-        best_hit = hits[0]
-        # context_hits = hits[:5]
+        # best_hit = hits[0]
+        context_hits = hits[:5]
 
         source = best_hit.payload.get('source', 'Unknown')
         page = best_hit.payload.get('page_number', 'N/A')
@@ -84,7 +84,7 @@ def main(force_reindex: bool = False):
         print(f"Found match: {source} (Page {page})")
         print("Generating answer...")
 
-        answer = generator.generate_answer(query, best_hit)
+        answer = generator.generate_answer(query, context_hits)
 
         aggressive_cleanup()
 
@@ -106,7 +106,7 @@ def main(force_reindex: bool = False):
             gr.Textbox(label="Query", placeholder="Ask your question..."),
             gr.Textbox(label="Source (optional: sbc / spd)", placeholder="e.g. sbc")
         ],
-        outputs=gr.Textbox(label="Response"),
+        outputs=gr.Textbox(label="Response", lines=15, max_lines=25),
         title="Multimodal RAG System",
         description="Ask questions with optional source filtering (sbc / spd)"
     )

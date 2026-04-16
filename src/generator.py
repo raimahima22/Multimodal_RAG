@@ -67,26 +67,28 @@ class MultimodalGenerator:
     
 
 
-    def generate_answer(self, query, retrieved_point):
+    def generate_answer(self, query, retrieved_points):
         
         start_gen = time.time()
-        source = retrieved_point.payload['source']
-        page_num = retrieved_point.payload.get('page_number')
-        retrieved_text = retrieved_point.payload.get('text', '')
+        # 
+        images = []
+        texts = []
+
+        for point in retrieved_points:
+            source = point.payload['source']
+            page_num = point.payload.get('page_number')
 
         if str(source).lower().endswith('.pdf'):
-            if page_num is None:
-                raise ValueError(f"Page number missing for PDF: {source}")
-            images = pdf_to_images(source)
-            target_image = images[page_num]
+            imgs = pdf_to_images(source)
+            img = imgs[page_num]
         else:
-            target_image = Image.open(source)
+            img = Image.open(source)
 
-        #OCR text extraction
-        extracted_text = self._extract_text(target_image)
+        images.append(img)
 
-        if not extracted_text.strip():
-            extracted_text = "No readable text found in image."
+        extracted_text = self._extract_text(img)
+        texts.append(extracted_text)
+        combined_text = "\n\n---\n\n".join(texts[:5])
 
 
         b64_image = pil_to_base64(target_image)
@@ -112,31 +114,27 @@ class MultimodalGenerator:
                 {
                     "type": "text",
                     "text": f"""
-You are an expert document analyst.
+        Answer the question using the provided context.
 
-You are given:
-1. An image of a document
-2. OCR extracted text from the same image
+        Rules:
+        - Be concise and direct
+        - Give only the final answer
+        - Use bullet points ONLY if needed
+        - Do NOT explain step-by-step unless asked
+        - Do NOT repeat the question
 
-Use BOTH to answer accurately.
+        -------------------
+        CONTEXT:
+        {combined_text}
+        -------------------
 
--------------------
-OCR TEXT:
-{extracted_text}
--------------------
+        QUESTION:
+        {query}
 
-Question:
-{query}
-
-If the answer is not present, clearly say so.
-"""
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{b64_image}"
-                    }
-                }
+        If the answer is not present, say:
+        "Answer not found in provided documents."
+        """
+               }
             ]
         )
 
