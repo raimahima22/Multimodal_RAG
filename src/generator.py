@@ -80,7 +80,7 @@ class MultimodalGenerator:
 
             if str(source).lower().endswith('.pdf'):
                 pages = pdf_to_images(source)
-                page_img = imgs[page_num]
+                page_img = pages[page_num]
             else:
                 page_img = Image.open(source)
 
