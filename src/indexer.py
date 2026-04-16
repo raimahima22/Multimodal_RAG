@@ -6,7 +6,8 @@ from pathlib import Path
 from PIL import Image
 import shutil
 import pytesseract
-import re, sys
+import re
+import sys
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -15,26 +16,21 @@ from qdrant_client.models import (
     MultiVectorConfig,
     MultiVectorComparator,
 )
-from pathlib import Path
-# from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 from transformers import AutoModel, AutoProcessor
 from src.utils import pdf_to_images
 
-def aggressive_cleanup():
-    
-    gc.collect()
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
+def aggressive_cleanup():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
-        # self.device = "cpu"
-        # self.torch_dtype = torch.float32
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.collection_name = collection_name
-        # self.model_name = "vidore/colSmol-500M"
         self.model_name = "TomoroAI/tomoro-colqwen3-embed-4b"
 
         self.chunk_size = 384
@@ -43,29 +39,17 @@ class MultimodalIndexer:
 
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
+
+        # Fix config and clear cache before loading model
         self._fix_colqwen3_config()
 
-        # from huggingface_hub import snapshot_download
-        # snapshot_download(
-        #     repo_id=self.model_name,
-        #     ignore_patterns=["*.bin", "*.safetensors", "*.pt", "*.gguf"]
-        # )
-        # patch_colqwen3_config()  
-
-        # self.model: ColIdefics3 = ColIdefics3.from_pretrained(
-        #     self.model_name,
-        #     torch_dtype=self.torch_dtype,
-        #     low_cpu_mem_usage=True,
-        #     device_map="cpu"
-        # ).to(self.device).eval()
         self.model = AutoModel.from_pretrained(
             self.model_name,
             torch_dtype=self.torch_dtype,
-            trust_remote_code=True
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
         ).to(self.device).eval()
 
-
-        # self.processor: ColIdefics3Processor = ColIdefics3Processor.from_pretrained(self.model_name)
         self.processor = AutoProcessor.from_pretrained(
             self.model_name,
             trust_remote_code=True
@@ -73,89 +57,64 @@ class MultimodalIndexer:
 
         print("Model and processor loaded successfully.")
 
-        # self.client = QdrantClient(path="qdrant_db")
-        # self.local_client = QdrantClient(path="qdrant_db")
         self.local_client = QdrantClient(":memory:")
-        # self.remote_client = QdrantClient(url="http://localhost:6333")
-        
 
         if force_recreate:
             self._recreate_collection()
         else:
             self._setup_collection()
-        def _fix_colqwen3_config(self):
-                """Automatically fixes the mutable default error and clears cache"""
-                import shutil
-                from huggingface_hub import hf_hub_download
-                from dataclasses import field
 
-                print(" Fixing ColQwen3 config and clearing cache...")
+    def _fix_colqwen3_config(self):
+        """Automatically fixes the mutable default error and clears cache"""
+        print("🔧 Fixing ColQwen3 config and clearing cache...")
 
-                try:
-                    # Force download fresh config
-                   config_path = hf_hub_download(
-                       repo_id=self.model_name,
-                       filename="configuration_colqwen3.py",
-                       force_download=True
-                    )
+        try:
+            from huggingface_hub import hf_hub_download
+            from dataclasses import field
 
-                    # Read and fix
-                    with open(config_path, 'r', encoding='utf-8') as f:
-                       content = f.read()
+            # Force download fresh config
+            config_path = hf_hub_download(
+                repo_id=self.model_name,
+                filename="configuration_colqwen3.py",
+                force_download=True
+            )
 
-                    # Fix the problematic line (handles multiple possible versions)
-                    content = re.sub(
-                      r'sub_configs\s*:\s*dict.*?=.*?\n',
-                      'sub_configs: dict = field(default_factory=dict)\n',
-                      content
-                    )
+            # Read and fix
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
 
-                    # Add import if missing
-                    if "from dataclasses import field" not in content:
-                        content = "from dataclasses import field\n" + content
+            # Fix sub_configs mutable default
+            content = re.sub(
+                r'sub_configs\s*:\s*dict.*?=.*?\n',
+                'sub_configs: dict = field(default_factory=dict)\n',
+                content
+            )
 
-                    # Write back the fixed config
-                    with open(config_path, 'w', encoding='utf-8') as f:
-                         f.write(content)
+            # Add import if missing
+            if "from dataclasses import field" not in content:
+                content = "from dataclasses import field\n" + content
 
-                    print(" Config file patched successfully!")
+            # Write back the fixed config
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write(content)
 
-                except Exception as e:
-                    print(f" Config patch warning: {e}")
+            print(" Config file patched successfully!")
 
-                # Clear old cached modules
-                shutil.rmtree("/root/.cache/huggingface/modules/transformers_modules/TomoroAI", 
-                               ignore_errors=True)
-                print(" Transformer module cache cleared!")
+        except Exception as e:
+            print(f"Config patch warning: {e}")
 
+        # Clear old cached modules
+        shutil.rmtree("/root/.cache/huggingface/modules/transformers_modules/TomoroAI", 
+                      ignore_errors=True)
+        print("Transformer module cache cleared!")
+
+    def _recreate_collection(self):
+        """Helper to recreate collection (add your logic here if needed)"""
+        if self.local_client.collection_exists(self.collection_name):
+            self.local_client.delete_collection(self.collection_name)
+        self._setup_collection()
 
     def _setup_collection(self):
-        # for client in [self.local_client, self.remote_client]:
-        #     if client.collection_exists(self.collection_name):
-        #         print(f"Using existing collection: {self.collection_name}")
-        #         continue
-        #     print("Detecting embedding dimension..")
-        #     with torch.no_grad():
-        #         dummy_img = Image.new("RGB", (224, 224)) #creating dummy input only for shape detection
-        #         inputs = self.processor.process_images([dummy_img]).to(self.device)
-        #         outputs = self.model(**inputs)
-        #         embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
-            
-        #     vectors_config = {
-        #         "image" : VectorParams(
-        #             size = embed_dim,
-        #             distance = Distance.COSINE,
-        #             multivector_config = MultiVectorConfig(
-        #                 comparator=MultiVectorComparator.MAX_SIM
-        #             )
-        #         )
-        #     }
-        #     client.create_collection(
-        #         collection_name = self.collection_name,
-        #         vectors_config = vectors_config
-        #     )
-        #     print("Collections ready in both local and server.")
-
         if self.local_client.collection_exists(self.collection_name):
             print(f" Using existing collection: {self.collection_name}")
             print(self.local_client.get_collection(self.collection_name))
@@ -187,8 +146,6 @@ class MultimodalIndexer:
         )
         print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
-    
-
     def is_collection_empty(self) -> bool:
         if not self.local_client.collection_exists(self.collection_name):
             return True
@@ -197,7 +154,6 @@ class MultimodalIndexer:
             if info.points_count == 0:
                 return True
             
-            # Additional verification
             points, _ = self.local_client.scroll(
                 collection_name=self.collection_name, limit=3, with_vectors=False
             )
@@ -210,7 +166,7 @@ class MultimodalIndexer:
         start = time.time()
         pil_img = pil_img.convert("RGB")
 
-        inputs = self.processor.process_images([pil_img], return_tensors="pt").to(self.device) #preprocess image
+        inputs = self.processor.process_images([pil_img], return_tensors="pt").to(self.device)
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -224,11 +180,9 @@ class MultimodalIndexer:
             embeddings = embeddings.cpu().numpy().astype(np.float32)
 
         print(f"  → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
-        
 
         del inputs, outputs
         aggressive_cleanup()
-        gc.collect()
         return embeddings
 
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
@@ -237,7 +191,7 @@ class MultimodalIndexer:
         points = []
 
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
-        if y_coords and y_coords[-1] + self.chunk_size < h: #last patch always covers bottom of image
+        if y_coords and y_coords[-1] + self.chunk_size < h:
             y_coords.append(h - self.chunk_size)
 
         x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
@@ -247,13 +201,13 @@ class MultimodalIndexer:
         y_coords = sorted(set(y_coords))
         x_coords = sorted(set(x_coords))
 
-        for y in y_coords: #creates a grid over the image (patch-extraction loop)
+        for y in y_coords:
             for x in x_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
                 multi_vector = self._extract_image_embeddings(patch)
 
                 point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
-                #create qdrant point
+
                 points.append(
                     PointStruct(
                         id=point_id,
@@ -275,11 +229,6 @@ class MultimodalIndexer:
                 points=points,
                 wait=True
             )
-            # self.remote_client.upsert(
-            #     collection_name=self.collection_name,
-            #     points=points,
-            #     wait=True
-            # )
 
         page_time = time.time() - start_page
         print(f"Page {page_num} completed: {page_time:.2f}s ")
@@ -311,18 +260,16 @@ class MultimodalIndexer:
 
     def index_all_data(self, data_dir: str = "data"):
         start_total = time.time()
-        print("Starting full indexing with colSmol-500M...\n")
+        print("Starting full indexing...\n")
 
         data_path = Path(data_dir)
         for file_path in data_path.rglob("*"):
             if file_path.suffix.lower() in [".pdf", ".jpg", ".jpeg", ".png"]:
-                if file_path.suffix.lower() == ".pdf": #if pdf use document pipeline
+                if file_path.suffix.lower() == ".pdf":
                     self.index_document(str(file_path))
                 else:
-                    self.index_image(str(file_path)) #use image pipeline if image
+                    self.index_image(str(file_path))
 
         total_index_time = time.time() - start_total
         aggressive_cleanup()
         print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
-
-    
