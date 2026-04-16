@@ -3,8 +3,9 @@ import transformers.integrations.peft as _ti
 _original_convert = _ti._convert_peft_config_moe
 
 def _patched_convert_peft_config_moe(peft_config, model_type):
-    if model_type == 'qwen2_vl':
-        return peft_config  # qwen2_vl is not MoE — skip conversion entirely
+    mapping = getattr(_ti, '_MOE_TARGET_MODULE_MAPPING', {})
+    if model_type not in mapping:
+        return peft_config  # not a known MoE model — skip conversion entirely
     return _original_convert(peft_config, model_type)
 
 _ti._convert_peft_config_moe = _patched_convert_peft_config_moe
