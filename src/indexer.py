@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image
 import shutil
 # import pytesseract
+from src.utils import pdf_to_images
 import re
 import sys
 from transformers.utils.import_utils import is_flash_attn_2_available
