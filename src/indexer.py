@@ -1,7 +1,13 @@
 import transformers.integrations.peft as _ti
 
-if hasattr(_ti, '_MOE_TARGET_MODULE_MAPPING'):
-    _ti._MOE_TARGET_MODULE_MAPPING.setdefault('qwen2_vl', {})
+_original_convert = _ti._convert_peft_config_moe
+
+def _patched_convert_peft_config_moe(peft_config, model_type):
+    if model_type == 'qwen2_vl':
+        return peft_config  # qwen2_vl is not MoE — skip conversion entirely
+    return _original_convert(peft_config, model_type)
+
+_ti._convert_peft_config_moe = _patched_convert_peft_config_moe
 
 import torch
 import gc
