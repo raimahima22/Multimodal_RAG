@@ -1,94 +1,118 @@
 import sys
 import gc
 import torch
+import ipywidgets as widgets
+from IPython.display import display
+
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
+
 def aggressive_cleanup():
-    
     gc.collect()
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def main(force_reindex: bool = False):
+
     print(" Initializing Multimodal RAG System...\n")
-    
-    # Initialize components
+
+    # =========================
+    # INIT COMPONENTS
+    # =========================
     indexer = MultimodalIndexer(force_recreate=force_reindex)
     retriever = MultimodalRetriever(indexer)
     generator = MultimodalGenerator()
 
-    print("Warming up model...")
-
+    print(" Warming up model...")
     _ = retriever._extract_text_embedding("warmup query")
-    print("Ready!")
+    print(" Ready!\n")
 
-    # Smart Indexing 
+    # =========================
+    # INDEXING PHASE
+    # =========================
     print("--- Phase 1: Checking Index ---")
-    
+
     if force_reindex:
-        print(" Force reindexing requested...")
+        print("Force reindexing...")
         indexer.index_all_data("data")
+
     elif indexer.is_collection_empty():
-        print(" Collection is empty → Starting indexing...")
+        print(" Collection empty → indexing...")
         indexer.index_all_data("data")
+
     else:
-        print(" Collection already has data. Skipping indexing.\n")
+        print(" Collection already exists. Skipping indexing.\n")
 
-    print(" System is ready! You can now ask questions.")
-    print("Type 'exit', 'quit', or 'q' to stop.\n")
+    print(" System ready for queries!\n")
 
-    while True:
-        query = input(" Your Question: ").strip()
-        
-        if query.lower() in ['exit', 'quit', 'q', '']:
-            print(" Goodbye!")
-            break
-        
-        # source_input = input("Source (sbc / spd ): ").strip().lower()
-        source_map = {
-            "sbc": "data/sbc.pdf",
-            "spd": "data/spd.pdf"
-        }
+    # =========================
+    # COLAB UI (IPYWIDGETS)
+    # =========================
 
-        source_filter = source_map.get(source_input, None)
+    text_box = widgets.Text(
+        placeholder="Ask your question here...",
+        description="Query:",
+        layout=widgets.Layout(width="70%")
+    )
 
-        #map input to the filter
-        if source_input in ["sbc", "sbc.pdf"]:
-            source_filter = "data/sbc.pdf"
-        elif source_input in ["spd", "spd.pdf"]:
-            source_filter = "data/spd.pdf"
-        else:
-            source_filter = None
-        
-        # print(f"\n Searching for: '{query}'")
-        print(f"\n Searching in: {'Both documents' if source_filter is None else source_filter}")
-        
-        hits = retriever.search(query, top_k=15, source_filter=source_filter)
-        
-        if hits:
+    button = widgets.Button(
+        description="Ask",
+        button_style="success"
+    )
+
+    output = widgets.Output()
+
+    def on_click(_):
+
+        with output:
+            output.clear_output()
+
+            query = text_box.value.strip()
+
+            if not query:
+                print(" Please enter a question.")
+                return
+
+            print(f" Searching for: {query}\n")
+
+            hits = retriever.search(query, top_k=15)
+
+            if not hits:
+                print(" No relevant documents found.")
+                return
+
             best_hit = hits[0]
-            # source = best_hit.payload['source', 'Unknown']
-            source = best_hit.payload.get('source', 'Unknown')
-            page = best_hit.payload.get('page_number', 'N/A')
-            
-            print(f" Found relevant match in: {source} (Page {page})")
-            
-            print(" Generating Answer...")
+
+            source = best_hit.payload.get("source", "Unknown")
+            page = best_hit.payload.get("page_number", "N/A")
+
+            print(f" Best match: {source} (Page {page})\n")
+            print(" Generating answer...\n")
+
             answer = generator.generate_answer(query, best_hit)
-            
-            print(f"\n--- FINAL ANSWER ---\n{answer}\n")
-            print("-" * 80 + "\n")
+
+            print("\n--- FINAL ANSWER ---\n")
+            print(answer)
+            print("\n" + "-" * 60 + "\n")
+
             aggressive_cleanup()
-        else:
-            print(" No relevant documents found.\n")
+
+    button.on_click(on_click)
+
+    display(text_box, button, output)
 
 
+# =========================
+# ENTRY POINT
+# =========================
 if __name__ == "__main__":
+
     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-    
+
     if force_reindex:
         print(" Reindex mode activated\n")
-    
+
     main(force_reindex=force_reindex)
