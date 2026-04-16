@@ -3,7 +3,8 @@ import numpy as np
 import gc
 import time
 from collections import defaultdict
-
+from src.utils import pdf_to_images
+from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
@@ -96,18 +97,63 @@ class MultimodalRetriever:
             if point.score > page_best[key]["score"]:
                 page_best[key] = {"score": point.score, "point": point}
 
+        # sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
+        # top_results = [item["point"] for item in sorted_pages[:5]]
         sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
-        top_results = [item["point"] for item in sorted_pages[:5]]
 
-        total_time = time.time() - start_search
-        print(f"Query embed: {embed_time:.3f}s | Retrieval: {retr_time:.3f}s | Total: {total_time:.3f}s")
-        
-        print("Retrieved pages:")
-        for i, p in enumerate(top_results, 1):
+        # get more candidates before reranking
+        initial_hits = [item["point"] for item in sorted_pages[:10]]
+        # 5. Rerank (MANDATORY)
+        if generator:
+            final_hits = self.rerank_hits(query_text, initial_hits, generator, top_k=5)
+        else:
+            final_hits = initial_hits[:5]
+
+
+        print("\n Top Retrieved Pages:")
+        for i, p in enumerate(final_hits, 1):
             src = p.payload.get("source", "unknown")
             pg = p.payload.get("page_number", "?")
             score = p.score
-            print(f"  {i}. {src} (Page {pg}) — score={score:.4f}")
+            print(f"{i}. {src} (Page {pg}) — score={score:.4f}")
 
         aggressive_cleanup()
-        return top_results
+        return final_hits
+    def rerank_hits(self, query, hits, generator, top_k=5):
+
+        scored = []
+
+        for point in hits:
+            source = point.payload.get("source")
+            page = point.payload.get("page_number")
+
+            try:
+                # load image
+                if str(source).lower().endswith(".pdf"):
+                    if source not in generator.pdf_cache:
+                        generator.pdf_cache[source] = pdf_to_images(source)
+                        img = generator.pdf_cache[source][page]
+                    else:
+                        img = Image.open(source)
+
+                    # OCR text
+                    text = generator._extract_text(img)
+                    text_lower = text.lower()
+
+                    # simple keyword score
+                    query_words = query.lower().split()
+                    score = sum(1 for w in query_words if w in text_lower)
+
+                    # combine with embedding score (VERY IMPORTANT)
+                    final_score = score + (point.score or 0)
+
+                    scored.append((final_score, point))
+
+            except Exception as e:
+                # fallback if anything fails
+                scored.append((point.score or 0, point))
+
+        # sort by combined score
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        return [p for _, p in scored[:top_k]]
