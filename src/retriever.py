@@ -34,12 +34,12 @@ class MultimodalRetriever:
             outputs = self.indexer.model(**inputs)
 
             # ColQwen2.5 / colpali-engine usually returns .embeddings
-            if hasattr(outputs, "embeddings") and outputs.embeddings is not None:
-                embedding = outputs.embeddings[0]          # (num_tokens, embed_dim)
-            elif hasattr(outputs, "text_embeds"):
-                embedding = outputs.text_embeds[0]
+            if isinstance(outputs, torch.Tensor):
+                embedding = outputs[0].cpu().numpy().astype(np.float32)         # (num_tokens, embed_dim)
+            elif hasattr(outputs, "query_embeddings"):
+                embedding = outputs.query_embeddings[0].cpu().numpy().astype(np.float32)
             elif hasattr(outputs, "last_hidden_state"):
-                embedding = outputs.last_hidden_state[0]
+                embedding = outputs.last_hidden_state[0].cpu().numpy().astype(np.float32)
             else:
                 raise ValueError(f"Unknown output format: {type(outputs)}")
 

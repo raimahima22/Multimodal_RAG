@@ -135,14 +135,27 @@ class MultimodalIndexer:
 
         inputs = self.processor.process_images([pil_img]).to(self.device)
 
+        # with torch.no_grad():
+        #     outputs = self.model(**inputs)
+        #     if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
+        #         embeddings = outputs.image_embeds[0]
+        #     elif hasattr(outputs, "last_hidden_state"):
+        #         embeddings = outputs.last_hidden_state[0]
+        #     else:
+        #         embeddings = outputs.hidden_states[-1][0] if hasattr(outputs, "hidden_states") else outputs[0]
+
+        #     embeddings = embeddings.cpu().numpy().astype(np.float32)
         with torch.no_grad():
             outputs = self.model(**inputs)
-            if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
+    
+            if isinstance(outputs, torch.Tensor):
+                embeddings = outputs[0]
+            elif hasattr(outputs, 'image_embeds') and outputs.image_embeds is not None:
                 embeddings = outputs.image_embeds[0]
-            elif hasattr(outputs, "last_hidden_state"):
+             elif hasattr(outputs, 'last_hidden_state'):
                 embeddings = outputs.last_hidden_state[0]
             else:
-                embeddings = outputs.hidden_states[-1][0] if hasattr(outputs, "hidden_states") else outputs[0]
+                embeddings = outputs[0]
 
             embeddings = embeddings.cpu().numpy().astype(np.float32)
 
