@@ -84,7 +84,7 @@ class MultimodalIndexer:
         else:
             self._setup_collection()
         def _fix_colqwen3_config(self):
-        """Automatically fixes the mutable default error and clears cache"""
+                """Automatically fixes the mutable default error and clears cache"""
                 import shutil
                 from huggingface_hub import hf_hub_download
                 from dataclasses import field
@@ -92,29 +92,29 @@ class MultimodalIndexer:
                 print(" Fixing ColQwen3 config and clearing cache...")
 
                 try:
-            # Force download fresh config
+                    # Force download fresh config
                    config_path = hf_hub_download(
                        repo_id=self.model_name,
                        filename="configuration_colqwen3.py",
                        force_download=True
                     )
 
-            # Read and fix
+                    # Read and fix
                     with open(config_path, 'r', encoding='utf-8') as f:
                        content = f.read()
 
-            # Fix the problematic line (handles multiple possible versions)
+                    # Fix the problematic line (handles multiple possible versions)
                     content = re.sub(
                       r'sub_configs\s*:\s*dict.*?=.*?\n',
                       'sub_configs: dict = field(default_factory=dict)\n',
                       content
                     )
 
-            # Add import if missing
+                    # Add import if missing
                     if "from dataclasses import field" not in content:
                         content = "from dataclasses import field\n" + content
 
-            # Write back the fixed config
+                    # Write back the fixed config
                     with open(config_path, 'w', encoding='utf-8') as f:
                          f.write(content)
 
@@ -123,7 +123,7 @@ class MultimodalIndexer:
                 except Exception as e:
                     print(f" Config patch warning: {e}")
 
-        # Clear old cached modules
+                # Clear old cached modules
                 shutil.rmtree("/root/.cache/huggingface/modules/transformers_modules/TomoroAI", 
                                ignore_errors=True)
                 print(" Transformer module cache cleared!")
