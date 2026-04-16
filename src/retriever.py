@@ -52,7 +52,7 @@ class MultimodalRetriever:
         aggressive_cleanup()
         return embedding, embed_time
 
-    def search(self, query_text: str, top_k: int = 15, source_filter: str = None):
+    def search(self, query_text: str, top_k: int = 15, source_filter: str = None, generator=None):
         start_search = time.time()
         
         # 1. Get multi-vector query embedding

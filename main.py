@@ -70,7 +70,7 @@ def main(force_reindex: bool = False):
         print(f"\nSearching for: {query}")
         print(f"Searching in: {'Both documents' if source_filter is None else source_filter}")
 
-        hits = retriever.search(query, top_k=15, source_filter=source_filter)
+        hits = retriever.search(query, top_k=15, source_filter=source_filter, generator=generator)
 
         if not hits:
             return "No relevant documents found."
