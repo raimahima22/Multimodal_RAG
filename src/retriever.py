@@ -56,7 +56,7 @@ class MultimodalRetriever:
                 raise ValueError(f"Unknown output format: {type(outputs)}")
 
             # Convert to numpy + L2 normalize each token vector
-            embedding = embedding.cpu().numpy().astype(np.float32)
+            # embedding = embedding.cpu().numpy().astype(np.float32)
             norms = np.linalg.norm(embedding, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             embedding = embedding / norms
