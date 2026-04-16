@@ -39,6 +39,16 @@ def aggressive_cleanup():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+def to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().to(torch.float32).cpu().numpy()
+    return np.asarray(x, dtype=np.float32)
+
+
+def l2_normalize(x):
+    norms = np.linalg.norm(x, axis=1, keepdims=True)
+    return x / np.clip(norms, 1e-8, None)
+
 
 class MultimodalIndexer:
     def __init__(self, collection_name="mrag_collection", force_recreate=True):
@@ -136,16 +146,7 @@ class MultimodalIndexer:
 
         inputs = self.processor.process_images([pil_img]).to(self.device)
 
-        # with torch.no_grad():
-        #     outputs = self.model(**inputs)
-        #     if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
-        #         embeddings = outputs.image_embeds[0]
-        #     elif hasattr(outputs, "last_hidden_state"):
-        #         embeddings = outputs.last_hidden_state[0]
-        #     else:
-        #         embeddings = outputs.hidden_states[-1][0] if hasattr(outputs, "hidden_states") else outputs[0]
-
-        #     embeddings = embeddings.cpu().numpy().astype(np.float32)
+    
         with torch.no_grad():
             outputs = self.model(**inputs)
     
@@ -158,7 +159,7 @@ class MultimodalIndexer:
             else:
                 embeddings = outputs[0]
 
-            embeddings = embeddings.cpu().numpy().astype(np.float32)
+            embeddings = to_numpy(embeddings)
 
         print(f"  → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
 
