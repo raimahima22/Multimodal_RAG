@@ -25,9 +25,9 @@ class MultimodalRetriever:
         inputs = self.indexer.processor.process_queries(
             [query_text],          # Note: list of strings
             # return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512,
+            # padding=True,
+            # truncation=True,
+            # max_length=512,
         ).to(self.indexer.device)
 
         with torch.no_grad():
