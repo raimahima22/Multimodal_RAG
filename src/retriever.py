@@ -20,52 +20,33 @@ class MultimodalRetriever:
     def _extract_text_embedding(self, query_text: str):
         """Extract multi-vector text embedding for ColQwen2.5"""
         start = time.time()
-
-        # === IMPORTANT: Use process_queries for ColQwen2.5 ===
-        inputs = self.indexer.processor.process_queries(
-            [query_text],          # Note: list of strings
-            # return_tensors="pt",
-            # padding=True,
-            # truncation=True,
-            # max_length=512,
-        ).to(self.indexer.device)
-
+    
+        inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
+    
         with torch.no_grad():
             outputs = self.indexer.model(**inputs)
-
-            def to_numpy(tensor):
-                return tensor.detach().to(torch.float32).cpu().numpy()
-
-            # ColQwen2.5 / colpali-engine usually returns .embeddings
-            if isinstance(outputs, torch.Tensor):
-                embedding = to_numpy(outputs[0])         # (num_tokens, embed_dim)
-            elif hasattr(outputs, "query_embeddings"):
+        
+            # ColQwen2.5 specific
+            if hasattr(outputs, "query_embeds") and outputs.query_embeds is not None:
+                embedding = to_numpy(outputs.query_embeds[0])
+            elif hasattr(outputs, "query_embeddings") and outputs.query_embeddings is not None:
                 embedding = to_numpy(outputs.query_embeddings[0])
-            elif hasattr(outputs, "last_hidden_state"):
-                embedding = to_numpy(outputs.last_hidden_state[0])
-             # Case 4: fallback (some models return dict-like outputs)
-            elif isinstance(outputs, dict):
-                if "query_embeddings" in outputs:
-                    embedding = to_numpy(outputs["query_embeddings"][0])
-                elif "last_hidden_state" in outputs:
-                    embedding = to_numpy(outputs["last_hidden_state"][0])
-                else:
-                    raise ValueError(f"Unknown dict output keys: {outputs.keys()}")
-
+            elif isinstance(outputs, torch.Tensor):
+                embedding = to_numpy(outputs[0])
             else:
-                raise ValueError(f"Unknown output format: {type(outputs)}")
-
-            # Convert to numpy + L2 normalize each token vector
-            # embedding = embedding.cpu().numpy().astype(np.float32)
+                embedding = to_numpy(outputs)  # last resort
+        
+        # L2 normalize each token vector (ColQwen2.5 expects this)
             norms = np.linalg.norm(embedding, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             embedding = embedding / norms
-
+    
         embed_time = time.time() - start
-
+        print(f"Query embedded in {embed_time:.3f}s | Tokens: {embedding.shape[0]}")
+    
         del inputs, outputs
         aggressive_cleanup()
-        return embedding, embed_time   # shape: (num_tokens, dim)
+        return embedding, embed_time
 
     def search(self, query_text: str, top_k: int = 15, source_filter: str = None):
         start_search = time.time()
@@ -96,14 +77,14 @@ class MultimodalRetriever:
             using="image",                   # vector name used during indexing
             query_filter=query_filter,
             limit=top_k,
-            score_threshold=0.3,             # lowered a bit for ColQwen2.5
+            score_threshold=None,             # lowered a bit for ColQwen2.5
         ).points
         retr_time = time.time() - retr_start
 
         # Average score by number of query tokens (common practice)
-        for point in results:
-            if hasattr(point, 'score') and point.score is not None:
-                point.score = point.score / num_query_tokens
+        # for point in results:
+        #     if hasattr(point, 'score') and point.score is not None:
+        #         point.score = point.score / num_query_tokens
 
         # Group by page and keep best score per page
         page_best = defaultdict(lambda: {"score": -1.0, "point": None})

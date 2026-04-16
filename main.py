@@ -75,7 +75,8 @@ def main(force_reindex: bool = False):
         if not hits:
             return "No relevant documents found."
 
-        best_hit = hits[0]
+        # best_hit = hits[0]
+        context_hits = hits[:5]
 
         source = best_hit.payload.get('source', 'Unknown')
         page = best_hit.payload.get('page_number', 'N/A')
@@ -83,7 +84,7 @@ def main(force_reindex: bool = False):
         print(f"Found match: {source} (Page {page})")
         print("Generating answer...")
 
-        answer = generator.generate_answer(query, best_hit)
+        answer = generator.generate_answer(query, context_hits)
 
         aggressive_cleanup()
 

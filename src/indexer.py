@@ -143,26 +143,24 @@ class MultimodalIndexer:
     def _extract_image_embeddings(self, pil_img: Image.Image) -> np.ndarray:
         start = time.time()
         pil_img = pil_img.convert("RGB")
-
+    
         inputs = self.processor.process_images([pil_img]).to(self.device)
-
     
         with torch.no_grad():
             outputs = self.model(**inputs)
-    
-            if isinstance(outputs, torch.Tensor):
+        
+            #ColQwen2.5 specific: model directly returns the multi-vector
+            if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
+                embeddings = outputs.image_embeds[0]          # batch=1
+            elif isinstance(outputs, torch.Tensor):
                 embeddings = outputs[0]
-            elif hasattr(outputs, 'image_embeds') and outputs.image_embeds is not None:
-                embeddings = outputs.image_embeds[0]
-            elif hasattr(outputs, 'last_hidden_state'):
-                embeddings = outputs.last_hidden_state[0]
             else:
-                embeddings = outputs[0]
-
+                embeddings = outputs  # fallback (should not reach here)
+        
             embeddings = to_numpy(embeddings)
-
-        print(f"  → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
-
+    
+        print(f" → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
+    
         del inputs, outputs
         aggressive_cleanup()
         return embeddings
