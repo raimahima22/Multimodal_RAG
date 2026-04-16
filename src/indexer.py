@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from PIL import Image
 import shutil
-import pytesseract
+# import pytesseract
 import re
 import sys
 from transformers.utils.import_utils import is_flash_attn_2_available
