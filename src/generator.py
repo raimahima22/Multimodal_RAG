@@ -12,7 +12,7 @@ import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
 
-load_dotenv()
+load_dotenv('/content/drive/MyDrive/.env')
 def aggressive_cleanup():
     
     gc.collect()

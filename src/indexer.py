@@ -1,3 +1,8 @@
+import transformers.integrations.peft as _ti
+
+if hasattr(_ti, '_MOE_TARGET_MODULE_MAPPING'):
+    _ti._MOE_TARGET_MODULE_MAPPING.setdefault('qwen2_vl', {})
+
 import torch
 import gc
 import numpy as np
