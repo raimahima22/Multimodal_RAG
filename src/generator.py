@@ -86,7 +86,7 @@ class MultimodalGenerator:
 
             images.append(page_img)
 
-            extracted_text = self._extract_text(img)
+            extracted_text = self._extract_text(page_img)
             texts.append(extracted_text)
         combined_text = "\n\n---\n\n".join(texts[:5])
 
