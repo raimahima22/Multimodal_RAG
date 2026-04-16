@@ -48,7 +48,7 @@ class MultimodalIndexer:
             trust_remote_code=True,
             # low_cpu_mem_usage=True,
             device_map="auto",
-            attn_implementation ="flash_attention_2" if torch.cuda.is_available() else None,
+            attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
     
         ).eval()
 
