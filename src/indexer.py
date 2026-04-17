@@ -85,10 +85,10 @@ class MultimodalIndexer:
 
         self.local_client = QdrantClient(path="/content/qdrant_db")
 
-        if force_recreate:
-            self._recreate_collection()
-        else:
-            self._setup_collection()
+        # if force_recreate:
+        #     self._recreate_collection()
+        # else:
+        #     self._setup_collection()
 
    
 
