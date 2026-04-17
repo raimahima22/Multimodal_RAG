@@ -86,9 +86,9 @@ class MultimodalRetriever:
         retr_time = time.time() - retr_start
 
         # Average score by number of query tokens (common practice)
-        # for point in results:
-        #     if hasattr(point, 'score') and point.score is not None:
-        #         point.score = point.score / num_query_tokens
+        for point in results:
+            if hasattr(point, 'score') and point.score is not None:
+                point.score = point.score / num_query_tokens
 
         # Group by page and keep best score per page
         page_best = defaultdict(lambda: {"score": -1.0, "point": None})
@@ -102,7 +102,7 @@ class MultimodalRetriever:
         sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
 
         # get more candidates before reranking
-        initial_hits = [item["point"] for item in sorted_pages[:10]]
+        initial_hits = [item["point"] for item in sorted_pages[:6]]
         # 5. Rerank (MANDATORY)
         if generator:
             final_hits = self.rerank_hits(query_text, initial_hits, generator, top_k=5)
@@ -127,33 +127,53 @@ class MultimodalRetriever:
             source = point.payload.get("source")
             page = point.payload.get("page_number")
 
+            emb_score = point.score or 0.0
+
+            #Early skip weak candidates (big speed boost) ===
+            if emb_score < 6.0:          # adjust threshold based on your data
+                scored.append((emb_score, point))
+                continue
+
             try:
-                # load image
+                #Image + Text Caching Logic
+                cache_key = (source, page)
+
+                #Initialize caches if not exist
+                if not hasattr(generator, 'pdf_cache'):
+                    generator.pdf_cache = {}
+                if not hasattr(generator, 'text_cache'):
+                    generator.text_cache = {}        # ← NEW: text cache
+
+                # Get image
                 if str(source).lower().endswith(".pdf"):
                     if source not in generator.pdf_cache:
                         generator.pdf_cache[source] = pdf_to_images(source)
+                
                         img = generator.pdf_cache[source][page]
                     else:
+                        # Direct image file
                         img = Image.open(source)
 
-                    # OCR text
-                    text = generator._extract_text(img)
+                    #Get text (cached)
+                    if cache_key not in generator.text_cache:
+                        text = generator._extract_text(img)
+                        generator.text_cache[cache_key] = text
+                    else:
+                        text = generator.text_cache[cache_key]
+
+                    # Simple keyword score
                     text_lower = text.lower()
+                    keyword_score = sum(1 for w in query_words if w in text_lower)
 
-                    # simple keyword score
-                    query_words = query.lower().split()
-                    score = sum(1 for w in query_words if w in text_lower)
-
-                    # combine with embedding score (VERY IMPORTANT)
-                    final_score = score + (point.score or 0)
+                    # Combine scores
+                    final_score = keyword_score * 1.0 + emb_score   # you can tune the weight
 
                     scored.append((final_score, point))
 
             except Exception as e:
-                # fallback if anything fails
-                scored.append((point.score or 0, point))
+                print(f"Warning: Rerank failed for {source} page {page}: {e}")
+                scored.append((emb_score, point))   # fallback to embedding score only
 
-        # sort by combined score
+        # Sort and return top_k
         scored.sort(key=lambda x: x[0], reverse=True)
-
         return [p for _, p in scored[:top_k]]

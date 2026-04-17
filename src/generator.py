@@ -123,14 +123,14 @@ class MultimodalGenerator:
                 {
                     "type": "text",
                     "text": f"""
-        Answer the question using the provided context.
+        You are a helpful assistant. Please answer the user's question based on the provided context.
 
-        Rules:
-        - Be concise and direct
-        - Give only the final answer
-        - Use bullet points ONLY if needed
+        Guidelines:
+        - Answer clearly and concisely
+        - Be polite and natural in your response
+        - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
-        - Do NOT repeat the question
+       
 
         -------------------
         CONTEXT:
