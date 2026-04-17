@@ -51,7 +51,7 @@ def l2_normalize(x):
 
 
 class MultimodalIndexer:
-    def __init__(self, collection_name="mrag_collection", force_recreate=True):
+    def __init__(self, collection_name="mrag_collection", force_recreate=False):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
         self.collection_name = collection_name

@@ -119,7 +119,7 @@ class MultimodalRetriever:
 
         aggressive_cleanup()
         return final_hits
-    def rerank_hits(self, query, hits, generator, top_k=5):
+    def rerank_hits(self, query, hits, generator, top_k=3):
 
         scored = []
 
