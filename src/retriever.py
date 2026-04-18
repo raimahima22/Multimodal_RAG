@@ -120,60 +120,23 @@ class MultimodalRetriever:
         aggressive_cleanup()
         return final_hits
     def rerank_hits(self, query, hits, generator, top_k=3):
-
+        query_words = query.lower().split()
         scored = []
 
         for point in hits:
-            source = point.payload.get("source")
-            page = point.payload.get("page_number")
 
             emb_score = point.score or 0.0
+            # Get pre-stored text
+            page_text = point.payload.get("text", "")
+            text_lower = point.payload.get("text_lower", page_text.lower())
 
-            #Early skip weak candidates (big speed boost) ===
-            if emb_score < 6.0:          # adjust threshold based on your data
-                scored.append((emb_score, point))
-                continue
+            #keyword boost
+            keyword_score = sum(1 for w in query_words if w in text_lower)
 
-            try:
-                #Image + Text Caching Logic
-                cache_key = (source, page)
-
-                #Initialize caches if not exist
-                if not hasattr(generator, 'pdf_cache'):
-                    generator.pdf_cache = {}
-                if not hasattr(generator, 'text_cache'):
-                    generator.text_cache = {}        # ← NEW: text cache
-
-                # Get image
-                if str(source).lower().endswith(".pdf"):
-                    if source not in generator.pdf_cache:
-                        generator.pdf_cache[source] = pdf_to_images(source)
-                
-                        img = generator.pdf_cache[source][page]
-                    else:
-                        # Direct image file
-                        img = Image.open(source)
-
-                    #Get text (cached)
-                    if cache_key not in generator.text_cache:
-                        text = generator._extract_text(img)
-                        generator.text_cache[cache_key] = text
-                    else:
-                        text = generator.text_cache[cache_key]
-
-                    # Simple keyword score
-                    text_lower = text.lower()
-                    keyword_score = sum(1 for w in query_words if w in text_lower)
-
-                    # Combine scores
-                    final_score = keyword_score * 1.0 + emb_score   # you can tune the weight
-
-                    scored.append((final_score, point))
-
-            except Exception as e:
-                print(f"Warning: Rerank failed for {source} page {page}: {e}")
-                scored.append((emb_score, point))   # fallback to embedding score only
-
-        # Sort and return top_k
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [p for _, p in scored[:top_k]]
+            #final score
+            final_score = emb_score + (keyword_score * 2.0)
+            scored.append((final_score, point))
+        
+        #sort and take top results
+        scored.sort(key=lambda x:x[0], reverse=True)
+        return [p for _, p in scored [:top_k]]
