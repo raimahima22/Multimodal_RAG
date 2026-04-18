@@ -105,7 +105,7 @@ class MultimodalRetriever:
         initial_hits = [item["point"] for item in sorted_pages[:8]]
         # 5. Rerank (MANDATORY)
         if generator:
-            final_hits = self.rerank_hits(query_text, initial_hits, generator, top_k=3)
+            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
         else:
             final_hits = initial_hits[:3]
 
@@ -119,7 +119,7 @@ class MultimodalRetriever:
 
         aggressive_cleanup()
         return final_hits
-    def rerank_hits(self, query: str, hits, top_k: int = 3):
+    def rerank_hits(self, query: str, hits, generator, top_k: int = 3):
         if not hits:
             return []
 
