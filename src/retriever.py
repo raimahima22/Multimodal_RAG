@@ -94,32 +94,40 @@ class MultimodalRetriever:
         page_best = defaultdict(lambda: {"score": -1.0, "point": None})
         for point in results:
             key = (point.payload.get("source"), point.payload.get("page_number"))
-            if point.score > page_best[key]["score"]:
-                page_best[key] = {"score": point.score, "point": point}
+            # if point.score > page_best[key]["score"]:
+            #     page_best[key] = {"score": point.score, "point": point}
+            score = point.score / num_query_tokens if point.score is not None else 0.0
+            
+            page_best[key]["all_scores"].append(score)
+            if score > page_best[key]["score"]:
+                page_best[key]["score"] = score
+                page_best[key]["point"] = point
 
         # sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
         # top_results = [item["point"] for item in sorted_pages[:5]]
         sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
 
         # get more candidates before reranking
-        initial_hits = [item["point"] for item in sorted_pages[:8]]
+        initial_hits = [item["point"] for item in sorted_pages[:10]]
         # 5. Rerank (MANDATORY)
         if generator:
-            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
+            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=6)
         else:
-            final_hits = initial_hits[:3]
+            final_hits = initial_hits[:6]
+        
+        final_hits = self._expand_adjacent_context(final_hits, max_pages=7)
 
 
         print("\n Top Retrieved Pages:")
         for i, p in enumerate(final_hits, 1):
             src = p.payload.get("source", "unknown")
             pg = p.payload.get("page_number", "?")
-            score = p.score
+            score = getattr(p, 'score', 0.0)
             print(f"{i}. {src} (Page {pg}) — score={score:.4f}")
 
         aggressive_cleanup()
         return final_hits
-    def rerank_hits(self, query: str, hits, generator, top_k: int = 3):
+    def rerank_hits(self, query: str, hits, generator, top_k: int = 6):
         if not hits:
             return []
 
@@ -160,3 +168,54 @@ class MultimodalRetriever:
 
         print(f" Hybrid Reranking: {len(hits)} candidates → {len(final_hits)} best pages")
         return final_hits
+    
+    def _expand_adjacent_context(self, hits, max_pages: int = 7):
+        """Smart expansion: Always include neighboring pages when relevant info is found"""
+        if not hits:
+            return hits
+
+        from collections import defaultdict
+        source_pages = defaultdict(list)
+
+        # Group by source document
+        for point in hits:
+            source = point.payload.get("source")
+            page = point.payload.get("page_number")
+            if source and page is not None:
+                source_pages[source].append((page, point))
+
+        expanded = []
+
+        for source, page_list in source_pages.items():
+            page_list.sort(key=lambda x: x[0])  # Sort by page number
+            pages = [p[0] for p in page_list]
+            points_map = {p[0]: p[1] for p in page_list}
+
+            selected = set()
+
+            for p_num in pages:
+                # Add current + previous + next page
+                for offset in [-1, 0, 1]:
+                    adj = p_num + offset
+                    if adj >= 0:
+                        selected.add(adj)
+
+            # Add selected pages in order
+            for p_num in sorted(selected)[:max_pages]:
+                if p_num in points_map:
+                    expanded.append(points_map[p_num])
+                else:
+                    # Optional: You can create a dummy point or skip
+                    pass
+
+        # Remove duplicates while keeping order
+        seen = set()
+        unique = []
+        for p in expanded:
+            key = (p.payload.get("source"), p.payload.get("page_number"))
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+
+        print(f"Context Expanded: {len(hits)} → {len(unique)} pages (adjacent included)")
+        return unique[:max_pages]
