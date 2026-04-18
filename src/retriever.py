@@ -102,7 +102,7 @@ class MultimodalRetriever:
         sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
 
         # get more candidates before reranking
-        initial_hits = [item["point"] for item in sorted_pages[:6]]
+        initial_hits = [item["point"] for item in sorted_pages[:8]]
         # 5. Rerank (MANDATORY)
         if generator:
             final_hits = self.rerank_hits(query_text, initial_hits, generator, top_k=5)
@@ -119,24 +119,44 @@ class MultimodalRetriever:
 
         aggressive_cleanup()
         return final_hits
-    def rerank_hits(self, query, hits, generator, top_k=3):
-        query_words = query.lower().split()
+    def rerank_hits(self, query: str, hits, top_k: int = 3):
+        if not hits:
+            return []
+
+        query_words = set(word.lower() for word in query.split())
         scored = []
 
         for point in hits:
-
             emb_score = point.score or 0.0
-            # Get pre-stored text
             page_text = point.payload.get("text", "")
             text_lower = point.payload.get("text_lower", page_text.lower())
 
-            #keyword boost
-            keyword_score = sum(1 for w in query_words if w in text_lower)
+            if len(page_text) < 10:   # Very weak page
+                scored.append((emb_score * 0.5, point))
+                continue
 
-            #final score
-            final_score = emb_score + (keyword_score * 2.0)
+            # 1. Keyword Match Score
+            exact_matches = sum(1 for w in query_words if w in text_lower)
+            partial_matches = sum(1 for w in query_words if any(w in token for token in text_lower.split()))
+
+            keyword_score = exact_matches * 2.0 + partial_matches * 0.5
+
+            # 2. Density Score (how concentrated the keywords are)
+            words_in_page = len(text_lower.split())
+            density_score = (exact_matches / max(1, words_in_page ** 0.4)) if words_in_page > 0 else 0
+
+            # 3. Final Hybrid Score (Best combination)
+            final_score = (
+                emb_score * 0.60 +           # Visual similarity (ColQwen) - main signal
+                keyword_score * 2.2 +        # Strong boost for keyword matches
+                density_score * 12.0         # Reward pages where keywords are dense
+            )
+
             scored.append((final_score, point))
-        
-        #sort and take top results
-        scored.sort(key=lambda x:x[0], reverse=True)
-        return [p for _, p in scored [:top_k]]
+
+        # Sort and return top results
+        scored.sort(key=lambda x: x[0], reverse=True)
+        final_hits = [p for _, p in scored[:top_k]]
+
+        print(f" Hybrid Reranking: {len(hits)} candidates → {len(final_hits)} best pages")
+        return final_hits

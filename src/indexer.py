@@ -17,8 +17,6 @@ import time
 from pathlib import Path
 from PIL import Image
 import shutil
-from src.utils import pdf_to_images
-import easyocr
 # import pytesseract
 from src.utils import pdf_to_images
 import re
@@ -35,21 +33,6 @@ from qdrant_client.models import (
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from transformers import AutoProcessor
 
-reader = easyocr.Reader(
-    ['en'],
-    gpu=torch.cuda.is_available(),
-    model_storage_directory="easyocr_models",
-    download_enabled=True
-)
-
-def extract_text_for_indexing(image: Image.Image) -> str:
-    """Extract text from full page during indexing"""
-    img = np.array(image.convert("RGB"))
-    results = reader.readtext(img, detail=0, batch_size=8)   # detail=0 = only text
-    text = "\n".join(results)
-    del img, results
-    gc.collect()
-    return text.strip()
 
 def aggressive_cleanup():
     gc.collect()
@@ -156,7 +139,6 @@ class MultimodalIndexer:
         except Exception as e:
             print(f"Error checking collection: {e}")
             return True
-    
 
     def _extract_image_embeddings(self, pil_img: Image.Image) -> np.ndarray:
         start = time.time()
@@ -188,8 +170,6 @@ class MultimodalIndexer:
         w, h = pil_img.size
         points = []
 
-        page_text = extract_text_for_indexing(pil_img)
-
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
         if y_coords and y_coords[-1] + self.chunk_size < h:
             y_coords.append(h - self.chunk_size)
@@ -218,9 +198,7 @@ class MultimodalIndexer:
                             "x": x,
                             "y": y,
                             "chunk_size": self.chunk_size,
-                            "num_tokens": int(multi_vector.shape[0]),
-                            "text": page_text,
-                            "text_lower":page_text.lower(),
+                            "num_tokens": int(multi_vector.shape[0])
                         }
                     )
                 )
@@ -275,5 +253,3 @@ class MultimodalIndexer:
         total_index_time = time.time() - start_total
         aggressive_cleanup()
         print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
-    
-    

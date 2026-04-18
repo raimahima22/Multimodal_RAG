@@ -5,6 +5,7 @@ from src.utils import pil_to_base64, pdf_to_images
 import os
 import torch
 import time
+import easyocr
 import gc
 # import pytesseract
 import numpy as np
@@ -36,24 +37,34 @@ class MultimodalGenerator:
         # )
 
         # self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
-        # self.reader = easyocr.Reader(
-        #     ['en'],
-        #     gpu=torch.cuda.is_available(),
-        #     model_storage_directory="easyocr_models"
-        # )
+        self.reader = easyocr.Reader(
+            ['en'],
+            gpu=torch.cuda.is_available(),
+            model_storage_directory="easyocr_models"
+        )
 
         self.pdf_cache = {}
     
-    # def _extract_text(self, image: Image.Image) -> str:
-    #     image=image.convert("RGB")
-    #     img = np.array(image)
-    #     results = self.reader.readtext(img)
+    def _extract_text(self, image: Image.Image) -> str:
+        image=image.convert("RGB")
+        img = np.array(image)
+        results = self.reader.readtext(img)
 
-    #     texts = [r[1] for r in results]
-    #     del img, results
-    #     gc.collect()
+        texts = [r[1] for r in results]
+        del img, results
+        gc.collect()
     
-    #     return "\n".join(texts)
+        return "\n".join(texts)
+    # def _extract_text(self, image: Image.Image) -> str:
+    #     try:
+    #         text = pytesseract.image_to_string(
+    #             image.convert("RGB"),
+    #             config='--psm 6'   # assume uniform block of text
+    #         )
+    #         return text.strip()
+    #     finally:
+    #         aggressive_cleanup()
+    
 
 
     def generate_answer(self, query, retrieved_points):
@@ -67,10 +78,6 @@ class MultimodalGenerator:
             source = point.payload['source']
             page_num = point.payload.get('page_number')
 
-            # Get pre-stored text
-            page_text = point.payload.get("text", "No text available")
-            texts.append(page_text)
-
             if str(source).lower().endswith('.pdf'):
                 pages = pdf_to_images(source)
                 page_img = pages[page_num]
@@ -79,8 +86,29 @@ class MultimodalGenerator:
 
             images.append(page_img)
 
+            extracted_text = self._extract_text(page_img)
+            texts.append(extracted_text)
         combined_text = "\n\n---\n\n".join(texts[:5])
 
+
+        # b64_image = pil_to_base64(target_image)
+
+#         message = HumanMessage(
+#             content=[
+#                 {
+#                     "type": "text",
+#                     "text": f"""You are an expert document analyst. 
+# You are given both an image of a document and an OCR extracted text from the same image.
+# Use BOTH to answer accurately.
+
+# Question: {query}"""
+#                 },
+#                 {
+#                     "type": "image_url",
+#                     "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}
+#                 }
+#             ]
+#         )
         image_messages = [
             {
                 "type": "image_url",
