@@ -21,20 +21,20 @@ def aggressive_cleanup():
 
 class MultimodalGenerator:
     def __init__(self):
-        # self.llm = ChatGroq(
-        #     model_name="meta-llama/llama-4-scout-17b-16e-instruct",
-        #     groq_api_key=os.environ.get("GROQ_API_KEY"),
-        #     temperature=0.2,      # Lower for more factual answers
-        #     max_tokens=1024,
-        # )
-        self.llm = ChatOpenAI(
-            model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
-            openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
-            openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.2,
+        self.llm = ChatGroq(
+            model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+            groq_api_key=os.environ.get("GROQ_API_KEY"),
+            temperature=0.2,      # Lower for more factual answers
             max_tokens=1024,
-            
         )
+        # self.llm = ChatOpenAI(
+        #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
+        #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
+        #     openai_api_base="https://openrouter.ai/api/v1",
+        #     temperature=0.2,
+        #     max_tokens=1024,
+            
+        # )
 
         # self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
         self.reader = easyocr.Reader(
