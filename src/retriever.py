@@ -91,7 +91,7 @@ class MultimodalRetriever:
                 point.score = point.score / num_query_tokens
 
         # Group by page and keep best score per page
-        page_best = defaultdict(lambda: {"score": -1.0, "point": None})
+        page_best = defaultdict(lambda: {"score": -1.0, "point": None, "all_scores":[]})
         for point in results:
             key = (point.payload.get("source"), point.payload.get("page_number"))
             # if point.score > page_best[key]["score"]:
