@@ -55,70 +55,65 @@ class MultimodalRetriever:
     def search(self, query_text: str, top_k: int = 15, source_filter: str = None, generator=None):
         start_search = time.time()
         
-        # 1. Get multi-vector query embedding
+        # 1. Get query embedding
         query_emb_array, embed_time = self._extract_text_embedding(query_text)
         num_query_tokens = query_emb_array.shape[0]
-        
         query_multi_vec = query_emb_array.tolist()
 
         # 2. Optional source filter
         query_filter = None
         if source_filter:
             query_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="source",
-                        match=MatchText(text=source_filter.lower())
-                    )
-                ]
+                must=[FieldCondition(key="source", match=MatchText(text=source_filter.lower()))]
             )
 
-        # 3. Query Qdrant (Multi-vector late interaction)
-        retr_start = time.time()
+        # 3. Query Qdrant
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_multi_vec,
-            using="image",                   # vector name used during indexing
+            using="image",
             query_filter=query_filter,
             limit=top_k,
-            score_threshold=None,             # lowered a bit for ColQwen2.5
+            score_threshold=None,
         ).points
-        retr_time = time.time() - retr_start
 
-        # Average score by number of query tokens (common practice)
+        # Normalize score once
         for point in results:
             if hasattr(point, 'score') and point.score is not None:
                 point.score = point.score / num_query_tokens
 
-        # Group by page and keep best score per page
-        page_best = defaultdict(lambda: {"score": -1.0, "point": None, "all_scores":[]})
+        # === IMPROVED GROUPING ===
+        page_best = defaultdict(lambda: {
+            "score": -1.0, 
+            "point": None, 
+            "all_scores": []
+        })
+
         for point in results:
             key = (point.payload.get("source"), point.payload.get("page_number"))
-            # if point.score > page_best[key]["score"]:
-            #     page_best[key] = {"score": point.score, "point": point}
-            score = point.score / num_query_tokens if point.score is not None else 0.0
+            score = point.score if point.score is not None else 0.0
             
             page_best[key]["all_scores"].append(score)
             if score > page_best[key]["score"]:
                 page_best[key]["score"] = score
                 page_best[key]["point"] = point
 
-        # sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
-        # top_results = [item["point"] for item in sorted_pages[:5]]
+        # Sort by best score per page
         sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
 
-        # get more candidates before reranking
+        # Take more candidates for reranking
         initial_hits = [item["point"] for item in sorted_pages[:10]]
-        # 5. Rerank (MANDATORY)
+
+        # Rerank
         if generator:
-            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=6)
+            final_hits = self.rerank_hits(query_text, initial_hits, generator, top_k=6)
         else:
             final_hits = initial_hits[:6]
-        
+
+        # Expand context (very important for split information)
         final_hits = self._expand_adjacent_context(final_hits, max_pages=7)
 
-
-        print("\n Top Retrieved Pages:")
+        print("\nFinal Retrieved Pages (with adjacent context):")
         for i, p in enumerate(final_hits, 1):
             src = p.payload.get("source", "unknown")
             pg = p.payload.get("page_number", "?")
