@@ -113,7 +113,14 @@ class MultimodalRetriever:
 
 
         # get more candidates before reranking
-        initial_hits = [item["point"] for item in sorted_pages[:8]]
+        initial_hits = [item["point"] for item in sorted_pages[:10]]
+
+        print("\n Initial Candidates (before reranking):")
+        for i, p in enumerate(initial_hits, 1):
+            src = p.payload.get("source", "unknown")
+            pg = p.payload.get("page_number", "?")
+            score = p.score
+            print(f"  {i}. {src} (Page {pg}) — score={score:.4f}")      
         # 5. Rerank (MANDATORY)
         if generator:
             final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
