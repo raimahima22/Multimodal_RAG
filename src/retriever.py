@@ -55,6 +55,23 @@ class MultimodalRetriever:
         del inputs, outputs
         aggressive_cleanup()
         return embedding, embed_time
+    
+    def _ocr_page(self, point, generator) -> str:
+        """OCR a page from a point's payload using generator's EasyOCR reader."""
+        source = point.payload.get("source", "")
+        page_num = point.payload.get("page_number", 0)
+        try:
+            if source.lower().endswith(".pdf"):
+                pages = pdf_to_images(source)
+                img = pages[page_num]
+            else:
+                img = Image.open(source)
+            text = generator._extract_text(img)
+            print(f"  OCR: Page {page_num} → {len(text)} chars extracted")
+            return text
+        except Exception as e:
+            print(f"  OCR failed for page {page_num}: {e}")
+            return ""
 
 
     def search(self, query_text: str, top_k: int = 15, source_filter: str = None, generator=None):
@@ -144,38 +161,21 @@ class MultimodalRetriever:
         if not hits:
             return []
 
-        query_words = set(word.lower() for word in query.split())
+        query_lower = query.lower()
+        query_words = set(query_lower.split())
+        query_tokens = query_lower.split()
         scored = []
 
         for point in hits:
             emb_score = point.score or 0.0
-            source = point.payload.get("source", "")
-            page_num = point.payload.get("page_number", 0)
+            page_num = point.payload.get("page_number", "?")
 
-            # Use stored text OR fall back to live OCR
-            page_text = point.payload.get("text", "")
-
-            if len(page_text) < 10 and generator:
-                try:
-                    if source.lower().endswith(".pdf"):
-                        from src.utils import pdf_to_images
-                        pages = pdf_to_images(source)
-                        img = pages[page_num]
-                    else:
-                        from PIL import Image
-                        img = Image.open(source)
-
-                    page_text = generator._extract_text(img)
-                    print(f"  OCR fallback: Page {page_num} → {len(page_text)} chars")
-
-                except Exception as e:
-                    print(f"  OCR failed for page {page_num}: {e}")
-                    page_text = ""
-
+            # Always OCR — payload text is empty
+            page_text = self._ocr_page(point, generator)
             text_lower = page_text.lower()
 
             if len(page_text) < 10:
-                # Very weak page — penalize
+                print(f"  Page {page_num} | too short after OCR → penalized")
                 scored.append((emb_score * 0.5, point))
                 continue
 
@@ -197,36 +197,32 @@ class MultimodalRetriever:
                 if words_in_page > 0 else 0
             )
 
-            # 4. Phrase match bonus — rewards pages with multi-word query phrases
+            # 4. Phrase match bonus (2-word and 3-word phrases)
             phrase_bonus = 0.0
-            query_lower = query.lower()
-            # Check all 2-word and 3-word subphrases from query
-            query_tokens = query_lower.split()
             for n in (2, 3):
                 for i in range(len(query_tokens) - n + 1):
-                    phrase = " ".join(query_tokens[i:i+n])
+                    phrase = " ".join(query_tokens[i:i + n])
                     if phrase in text_lower:
-                        phrase_bonus += n * 1.5   # longer phrase = bigger reward
+                        phrase_bonus += n * 1.5
 
             # 5. Final hybrid score
             final_score = (
-                emb_score * 0.55 +
+                emb_score   * 0.55 +
                 keyword_score * 2.2 +
                 density_score * 12.0 +
-                phrase_bonus * 1.5
+                phrase_bonus  * 1.5
             )
 
-            # print(
-            #     f"  Page {page_num} | emb={emb_score:.4f} | "
-            #     f"kw={keyword_score:.2f} | den={density_score:.3f} | "
-            #     f"phrase={phrase_bonus:.2f} | final={final_score:.4f}"
-            # )
+            print(
+                f"  Page {page_num} | emb={emb_score:.4f} | "
+                f"kw={keyword_score:.2f} | den={density_score:.3f} | "
+                f"phrase={phrase_bonus:.2f} | final={final_score:.4f}"
+            )
 
             scored.append((final_score, point))
 
-            # Sort and return top results
-            scored.sort(key=lambda x: x[0], reverse=True)
-            final_hits = [p for _, p in scored[:top_k]]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        final_hits = [p for _, p in scored[:top_k]]
 
-            print(f"\n Hybrid Reranking: {len(hits)} candidates → {len(final_hits)} best pages")
-            return final_hits
+        print(f"\n Reranking done: {len(hits)} candidates → {len(final_hits)} best pages")
+        return final_hits
