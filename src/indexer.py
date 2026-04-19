@@ -83,7 +83,7 @@ class MultimodalIndexer:
 
         print("Model and processor loaded successfully.")
 
-        self.local_client = QdrantClient(path="/content/qdrant_db")
+        self.local_client = QdrantClient(path="/content/drive/MyDrive/qdrant_db")
 
         if force_recreate:
             self._recreate_collection()
