@@ -208,9 +208,9 @@ class MultimodalRetriever:
             print(f"  {i}. {src} (Page {pg}) — score={score:.4f}")      
         # 5. Rerank (MANDATORY)
         if generator:
-            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
+            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=5)
         else:
-            final_hits = initial_hits[:3]
+            final_hits = initial_hits[:5]
 
         print("\n Top Retrieved Pages:")
         for i, p in enumerate(final_hits, 1):
@@ -223,7 +223,7 @@ class MultimodalRetriever:
         aggressive_cleanup()
         return final_hits
 
-    def rerank_hits(self, query: str, hits, generator, top_k: int = 3):
+    def rerank_hits(self, query: str, hits, generator, top_k: int = 5):
         """
         Multi-signal hybrid reranker.
  

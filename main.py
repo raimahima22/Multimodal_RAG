@@ -76,7 +76,7 @@ def main(force_reindex: bool = False):
             return "No relevant documents found."
 
         
-        context_hits = retriever.rerank_hits(query, hits, generator, top_k=3)
+        context_hits = retriever.rerank_hits(query, hits, generator, top_k=5)
         best_hit = context_hits[0]
 
         source = best_hit.payload.get('source', 'Unknown')
