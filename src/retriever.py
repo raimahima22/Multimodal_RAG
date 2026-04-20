@@ -8,7 +8,13 @@ from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
-
+STOPWORDS = {
+    "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
+    "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
+    "when", "where", "who", "which", "do", "does", "did", "was", "were",
+    "be", "been", "being", "has", "have", "had", "by", "from", "about",
+}
+ 
 
 def aggressive_cleanup():
     gc.collect()
@@ -19,6 +25,66 @@ def to_numpy(x):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
+ 
+def tokenize(text: str) -> list[str]:
+    """Lowercase, split on non-alphanumeric, remove stopwords."""
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return [t for t in tokens if t not in STOPWORDS]
+ 
+ 
+def extract_numbers(text: str) -> set[str]:
+    """Pull raw numeric strings from text (integers, decimals, percentages)."""
+    return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
+
+class BM25:
+    """
+    Fit on a small corpus of OCR'd page texts, then score 
+    each document against a query.
+    """
+
+    def __init__(self, k1 = 1.5, b:float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self.corpus_size = 0
+        self.avgdl = 0.0
+        self.doc_freqs: list[dict] = [] #count per document
+        self.idf: dict[str, float] = {}
+        self.doc_lens: list[int] = []
+    
+    def fit(self, corpus:list[str]):
+        """corpus: list of raw page texts."""
+        tokenized = [tokenize (doc) for doc in corpus]
+        self.corpus_size = len(tokenized)
+        self.doc_lens = [len(d) for d in tokenized]
+        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
+        self.doc_freqs = []
+
+        df:dict[str, int] = defaultdict(int)
+        for doc in tokenized:
+            freq: dict[str, int] = defaultdict(int)
+            for tok in doc:
+                freq[tok] += 1
+            self.doc_freqs.append(dict(freq))
+            for tok in set(doc):
+                df[tok] += 1
+ 
+        for term, n in df.items():
+            self.idf[term] = math.log(
+                (self.corpus_size - n + 0.5) / (n + 0.5) + 1
+            )
+    def score(self, query_tokens: list[str], doc_idx: int) -> float:
+        score = 0.0
+        dl = self.doc_lens[doc_idx]
+        freq_map = self.doc_freqs[doc_idx]
+        for tok in query_tokens:
+            if tok not in freq_map:
+                continue
+            f = freq_map[tok]
+            idf = self.idf.get(tok, 0.0)
+            num = f * (self.k1 + 1)
+            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
+            score += idf * num / den
+        return score
 
 class MultimodalRetriever:
     def __init__(self, indexer):
@@ -144,9 +210,6 @@ class MultimodalRetriever:
         else:
             final_hits = initial_hits[:3]
 
-
-
-
         print("\n Top Retrieved Pages:")
         for i, p in enumerate(final_hits, 1):
             src = p.payload.get("source", "unknown")
@@ -157,72 +220,136 @@ class MultimodalRetriever:
 
         aggressive_cleanup()
         return final_hits
+
     def rerank_hits(self, query: str, hits, generator, top_k: int = 3):
+        """
+        Multi-signal hybrid reranker.
+ 
+        Signals
+        -------
+        1.  ColQwen2.5 late-interaction embedding score  (semantic)
+        2.  BM25 on OCR text                             (lexical, tf-idf weighted)
+        3.  Exact / partial keyword match                (surface form)
+        4.  N-gram phrase match (bi/trigram)             (phrase precision)
+        5.  Numeric / entity exact match                 (critical for tables, stats)
+ 
+        Fusion: Reciprocal Rank Fusion (RRF) across all signals.
+        """
         if not hits:
             return []
-
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        query_tokens = query_lower.split()
-        scored = []
-
+ 
+        # ── 0. OCR every candidate page ──────────────────────────────────────
+        ocr_texts: list[str] = []
+        valid_hits = []
         for point in hits:
-            emb_score = point.score or 0.0
-            page_num = point.payload.get("page_number", "?")
-
-            # Always OCR — payload text is empty
-            page_text = self._ocr_page(point, generator)
-            text_lower = page_text.lower()
-
-            if len(page_text) < 10:
-                print(f"  Page {page_num} | too short after OCR → penalized")
-                scored.append((emb_score * 0.5, point))
-                continue
-
-            # 1. Exact keyword match score
-            exact_matches = sum(1 for w in query_words if w in text_lower)
-
-            # 2. Partial keyword match score
-            partial_matches = sum(
-                1 for w in query_words
-                if any(w in token for token in text_lower.split())
+            text = self._ocr_page(point, generator)
+            ocr_texts.append(text)
+            valid_hits.append(point)
+ 
+        # ── 1. BM25 on OCR corpus ─────────────────────────────────────────────
+        bm25 = BM25()
+        bm25.fit(ocr_texts)
+        query_tokens = tokenize(query)
+ 
+        bm25_scores = [
+            bm25.score(query_tokens, i) for i in range(len(valid_hits))
+        ]
+ 
+        # ── 2. Keyword signals ────────────────────────────────────────────────
+        query_lower = query.lower()
+        raw_query_words = set(query_lower.split())
+        content_words = raw_query_words - STOPWORDS  # only meaningful terms
+ 
+        # numbers / numeric entities mentioned in the query
+        query_numbers = extract_numbers(query_lower)
+        query_tokens_raw = query_lower.split()
+ 
+        keyword_scores: list[float] = []
+        phrase_scores: list[float] = []
+        number_scores: list[float] = []
+ 
+        for text in ocr_texts:
+            text_lower = text.lower()
+            page_words = text_lower.split()
+ 
+            # 2a. Exact content-word matches (stopwords stripped)
+            exact = sum(1 for w in content_words if w in text_lower)
+ 
+            # 2b. Partial / substring matches for content words
+            partial = sum(
+                1 for w in content_words
+                if any(w in tok for tok in page_words)
+                and w not in text_lower  # not already counted as exact
             )
-
-            keyword_score = exact_matches * 2.0 + partial_matches * 0.5
-
-            # 3. Density score
-            words_in_page = len(text_lower.split())
-            density_score = (
-                exact_matches / max(1, words_in_page ** 0.4)
-                if words_in_page > 0 else 0
-            )
-
-            # 4. Phrase match bonus (2-word and 3-word phrases)
+ 
+            keyword_scores.append(exact * 2.0 + partial * 0.5)
+ 
+            # 2c. N-gram phrase match (2- and 3-word phrases, no stopwords filter)
             phrase_bonus = 0.0
             for n in (2, 3):
-                for i in range(len(query_tokens) - n + 1):
-                    phrase = " ".join(query_tokens[i:i + n])
+                for i in range(len(query_tokens_raw) - n + 1):
+                    phrase = " ".join(query_tokens_raw[i : i + n])
                     if phrase in text_lower:
-                        phrase_bonus += n * 1.5
-
-            # 5. Final hybrid score
-            final_score = (
-                emb_score   * 0.55 +
-                keyword_score * 2.2 +
-                density_score * 12.0 +
-                phrase_bonus  * 1.5
+                        phrase_bonus += n * 2.0   # longer phrase = stronger signal
+            phrase_scores.append(phrase_bonus)
+ 
+            # 2d. Numeric / entity exact match
+            #     Answers to "what is the value of X" almost always contain the number.
+            if query_numbers:
+                page_numbers = extract_numbers(text_lower)
+                matched = len(query_numbers & page_numbers)
+                number_scores.append(matched * 3.0)
+            else:
+                number_scores.append(0.0)
+ 
+        # ── 3. Reciprocal Rank Fusion (RRF) ───────────────────────────────────
+        # k=60 is the standard RRF constant
+        def rrf_ranks(scores: list[float], k: int = 60) -> list[float]:
+            order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+            ranks = [0.0] * len(scores)
+            for rank, idx in enumerate(order):
+                ranks[idx] = 1.0 / (k + rank + 1)
+            return ranks
+ 
+        emb_scores = [p.score for p in valid_hits]
+        rrf_emb    = rrf_ranks(emb_scores)
+        rrf_bm25   = rrf_ranks(bm25_scores)
+        rrf_kw     = rrf_ranks(keyword_scores)
+        rrf_phrase = rrf_ranks(phrase_scores)
+        rrf_num    = rrf_ranks(number_scores)
+ 
+        # Signal weights — tune based on your document types.
+        # For dense-text docs raise w_bm25; for tables/figures raise w_num.
+        w_emb    = 0.30
+        w_bm25   = 0.25
+        w_kw     = 0.20
+        w_phrase = 0.15
+        w_num    = 0.10
+ 
+        scored = []
+        for i, point in enumerate(valid_hits):
+            final = (
+                w_emb    * rrf_emb[i]
+                + w_bm25   * rrf_bm25[i]
+                + w_kw     * rrf_kw[i]
+                + w_phrase * rrf_phrase[i]
+                + w_num    * rrf_num[i]
             )
-
+ 
+            pg = point.payload.get("page_number", "?")
             print(
-                f"  Page {page_num} | emb={emb_score:.4f} | "
-                f"kw={keyword_score:.2f} | den={density_score:.3f} | "
-                f"phrase={phrase_bonus:.2f} | final={final_score:.4f}"
+                f"  Page {pg} | emb={emb_scores[i]:.4f} | "
+                f"bm25={bm25_scores[i]:.3f} | kw={keyword_scores[i]:.2f} | "
+                f"phrase={phrase_scores[i]:.2f} | num={number_scores[i]:.2f} | "
+                f"RRF={final:.5f}"
             )
-
-            scored.append((final_score, point))
-
+ 
+            # Store the fused score back on the point so callers can read it
+            point.score = final
+            scored.append((final, point))
+ 
         scored.sort(key=lambda x: x[0], reverse=True)
         final_hits = [p for _, p in scored[:top_k]]
-
-        print(f"\n Reranking done: {len(hits)} candidates → {len(final_hits)} best pages")
+ 
+        print(f"\n Reranking done: {len(hits)} candidates → {len(final_hits)} selected")
         return final_hits
