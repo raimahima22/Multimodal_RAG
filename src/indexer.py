@@ -90,7 +90,6 @@ class MultimodalIndexer:
         else:
             self._setup_collection()
 
-   
 
     def _setup_collection(self):
         if self.local_client.collection_exists(self.collection_name):
@@ -253,3 +252,7 @@ class MultimodalIndexer:
         total_index_time = time.time() - start_total
         aggressive_cleanup()
         print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
+    
+    def close(self):
+        if self.local_client:
+            self.local_client.close()
