@@ -2,11 +2,29 @@ import sys
 import gc
 import torch
 import gradio as gr
+from datetime import datetime
 
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
+HISTORY_FILE = "chat_history.json"
+
+def save_to_history(query, source_input, answer):
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            history = json.load(f)
+    
+    history.append({
+        "timestamp": datetime.now().isoformat(),
+        "query": query,
+        "source": source_input,
+        "answer": answer
+    })
+    
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
 
 def aggressive_cleanup():
     gc.collect()
@@ -76,8 +94,10 @@ def main(force_reindex: bool = False):
             return "No relevant documents found."
 
         
-        context_hits = retriever.rerank_hits(query, hits, generator, top_k=5)
-        best_hit = context_hits[0]
+        # context_hits = retriever.rerank_hits(query, hits, generator, top_k=5)
+        # best_hit = context_hits[0]
+        context_hits = hits
+        best_hit = hits[0]
 
         source = best_hit.payload.get('source', 'Unknown')
         page = best_hit.payload.get('page_number', 'N/A')
@@ -86,6 +106,7 @@ def main(force_reindex: bool = False):
         print("Generating answer...")
 
         answer = generator.generate_answer(query, context_hits)
+        save_to_history(query, source_input, answer)
 
         aggressive_cleanup()
 

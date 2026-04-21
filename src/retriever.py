@@ -168,7 +168,9 @@ class MultimodalRetriever:
         num_query_tokens = query_emb_array.shape[0]
         for point in results:
             if point.score is not None:
-                point.score = point.score / num_query_tokens
+                # point.score = point.score / num_query_tokens
+                page_tokens = point.payload.get("num_patches", 1)
+                point.score = point.score / (num_query_tokens * np.log1p(page_tokens))
 
         print(f"Qdrant retrieval done in {time.time() - start_search:.2f}s | Candidates: {len(results)}")
 
@@ -191,7 +193,7 @@ class MultimodalRetriever:
 
         # --- OCR once and cache ---
         ocr_texts = []
-        for point in hits:
+        for point in hits[:10]:
             text = self._ocr_page(point, generator)   # Still necessary unless you pre-compute
             ocr_texts.append(text)
 
