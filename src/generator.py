@@ -5,7 +5,7 @@ from src.utils import pil_to_base64, pdf_to_images, get_pdf_page, clear_page_cac
 import os
 import torch
 import time
-# import easyocr
+import easyocr
 import gc
 # import tiktoken
 import numpy as np
