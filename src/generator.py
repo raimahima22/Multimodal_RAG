@@ -89,7 +89,7 @@ class MultimodalGenerator:
 
             extracted_text = self._extract_text(page_img)
             texts.append(extracted_text)
-        combined_text = "\n\n---\n\n".join(texts[:5])
+        combined_text = "\n\n---\n\n".join(texts[:3])
 
         image_messages = [
             {
@@ -98,7 +98,7 @@ class MultimodalGenerator:
                     "url": f"data:image/jpeg;base64,{pil_to_base64(img)}"
                 }
             }
-            for img in images[:5]
+            for img in images[:3]
         ]
         message = HumanMessage(
             content=[

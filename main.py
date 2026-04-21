@@ -90,105 +90,14 @@ def main(force_reindex: bool = False):
         print(f"\nSearching for: {query}")
         print(f"Searching in: {'Both documents' if source_filter is None else source_filter}")
 
-        import sys
-import gc
-import torch
-import gradio as gr
-from datetime import datetime
-from src.utils import clear_page_cache
-import os
-import json
-from src.indexer import MultimodalIndexer
-from src.retriever import MultimodalRetriever
-from src.generator import MultimodalGenerator
-
-HISTORY_FILE = "chat_history.json"
-
-def save_to_history(query, source_input, answer):
-    history = []
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
-            history = json.load(f)
-    
-    history.append({
-        "timestamp": datetime.now().isoformat(),
-        "query": query,
-        "source": source_input,
-        "answer": answer
-    })
-    
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-def aggressive_cleanup():
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-def main(force_reindex: bool = False):
-    print("Initializing Multimodal RAG System...\n")
-
-    #initialize components
-    indexer = MultimodalIndexer(force_recreate=force_reindex)
-    retriever = MultimodalRetriever(indexer)
-    generator = MultimodalGenerator()
-
-    print("Warming up model...")
-    _ = retriever._extract_text_embedding("warmup query")
-    print("Ready!")
-
-    # INDEXING
-    print("--- Phase 1: Checking Index ---")
-
-    if force_reindex:
-        print("Force reindexing...")
-        indexer.index_all_data("data")
-    elif indexer.is_collection_empty():
-        print("Collection is empty → indexing...")
-        indexer.index_all_data("data")
-    else:
-        print("Collection already has data. Skipping indexing.\n")
-
-    print("System is ready!\n")
-
-    
-    # SOURCE MAP
-   
-    source_map = {
-        "sbc": "data/sbc.pdf",
-        "spd": "data/spd.pdf"
-    }
-
-  
-    # GRADIO FUNCTION
-  
-    def answer_query(query, source_input):
-
-        query = query.strip()
-        source_input = source_input.strip().lower()
-
-        if not query:
-            return "Please enter a question."
-
-        # === SOURCE FILTER LOGIC (kept exactly as you wanted) ===
-        if source_input in ["sbc", "sbc.pdf"]:
-            source_filter = "data/sbc.pdf"
-        elif source_input in ["spd", "spd.pdf"]:
-            source_filter = "data/spd.pdf"
-        else:
-            source_filter = None
-
-        print(f"\nSearching for: {query}")
-        print(f"Searching in: {'Both documents' if source_filter is None else source_filter}")
 
         try:
-            hits = retriever.search(query, top_k=15, source_filter=source_filter, generator=generator)
+            hits = retriever.search(query, top_k=3, source_filter=source_filter, generator=generator)
 
             if not hits:
                 return "No relevant documents found."
 
-            context_hits = hits[:5]
+            context_hits = hits
             best_hit = context_hits[0]
 
             source = best_hit.payload.get('source', 'Unknown')

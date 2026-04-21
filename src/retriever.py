@@ -159,7 +159,7 @@ class MultimodalRetriever:
             query=query_multi_vec,
             using="image",
             query_filter=query_filter,
-            limit=20,                    # Increased a bit for better reranking pool
+            limit=10,                   
             score_threshold=None,
         ).points
 
@@ -185,7 +185,7 @@ class MultimodalRetriever:
         return final_hits
 
 
-    def _hybrid_rerank(self, query: str, hits, generator, top_k: int = 5):
+    def _hybrid_rerank(self, query: str, hits, generator, top_k: int = 3):
         """Single-pass hybrid reranker (Embedding + BM25 + Keyword + Numeric)"""
         if not hits:
             return []
