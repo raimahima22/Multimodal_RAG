@@ -5,7 +5,7 @@ from pdf2image import convert_from_path
 
 def pdf_to_images(pdf_path):
     # Converts PDF pages to PIL Images
-    return convert_from_path(pdf_path, dpi=250)
+    return convert_from_path(pdf_path, dpi=300)
 
 def pil_to_base64(image):
     # Encodes PIL image to base64 for LLM transmission

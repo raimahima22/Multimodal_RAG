@@ -57,9 +57,9 @@ class MultimodalIndexer:
         self.collection_name = collection_name
         self.model_name = "vidore/colqwen2.5-v0.2"
 
-        self.chunk_size = 512
-        self.overlap = 128
-        self.stride = self.chunk_size - self.overlap
+        # self.chunk_size = 512
+        # self.overlap = 128
+        # self.stride = self.chunk_size - self.overlap
 
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
@@ -166,48 +166,28 @@ class MultimodalIndexer:
 
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
-        w, h = pil_img.size
-        points = []
+        multi_vector = self._extract_image_embeddings(pil_img)
 
-        y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
-        if y_coords and y_coords[-1] + self.chunk_size < h:
-            y_coords.append(h - self.chunk_size)
+        # Use a deterministic ID
+        point_id = abs(hash(f"{source}_page_{page_num}")) % (10**15)
 
-        x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
-        if x_coords and x_coords[-1] + self.chunk_size < w:
-            x_coords.append(w - self.chunk_size)
+        point = PointStruct(
+            id=point_id,
+            vector={"image": multi_vector.tolist()},
+            payload={
+                "page_number": page_num,
+                "source": str(source),
+                "width": pil_img.width,
+                "height": pil_img.height,
+                "num_patches": int(multi_vector.shape[0])
+            }
+        )
 
-        y_coords = sorted(set(y_coords))
-        x_coords = sorted(set(x_coords))
-
-        for y in y_coords:
-            for x in x_coords:
-                patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
-                multi_vector = self._extract_image_embeddings(patch)
-
-                point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
-
-                points.append(
-                    PointStruct(
-                        id=point_id,
-                        vector={"image": multi_vector.tolist()},
-                        payload={
-                            "page_number": page_num,
-                            "source": str(source),
-                            "x": x,
-                            "y": y,
-                            "chunk_size": self.chunk_size,
-                            "num_tokens": int(multi_vector.shape[0])
-                        }
-                    )
-                )
-
-        if points:
-            self.local_client.upsert(
-                collection_name=self.collection_name,
-                points=points,
-                wait=True
-            )
+        self.local_client.upsert(
+            collection_name=self.collection_name,
+            points=[point],
+            wait=True
+        )
 
         page_time = time.time() - start_page
         print(f"Page {page_num} completed: {page_time:.2f}s ")
@@ -216,7 +196,7 @@ class MultimodalIndexer:
 
     def index_document(self, pdf_path: str):
         start_doc = time.time()
-        images = pdf_to_images(pdf_path)
+        images = pdf_to_images(pdf_path, dpi=300)
         print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
 
         total_time = 0.0
