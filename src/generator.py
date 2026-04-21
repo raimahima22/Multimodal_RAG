@@ -73,7 +73,7 @@ class MultimodalGenerator:
         start_gen = time.time()
         # 
         images = []
-        # texts = []
+        texts = []
 
         for point in retrieved_points:
             source = point.payload['source']
@@ -87,9 +87,9 @@ class MultimodalGenerator:
 
             images.append(page_img)
 
-        #     extracted_text = self._extract_text(page_img)
-        #     texts.append(extracted_text)
-        # combined_text = "\n\n---\n\n".join(texts[:3])
+            extracted_text = self._extract_text(page_img)
+            texts.append(extracted_text)
+        combined_text = "\n\n---\n\n".join(texts[:3])
 
         image_messages = [
             {
