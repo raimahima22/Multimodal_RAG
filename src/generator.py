@@ -46,16 +46,16 @@ class MultimodalGenerator:
 
         # self.pdf_cache = {}
     
-    # def _extract_text(self, image: Image.Image) -> str:
-    #     image=image.convert("RGB")
-    #     img = np.array(image)
-    #     results = self.reader.readtext(img)
+    def _extract_text(self, image: Image.Image) -> str:
+        image=image.convert("RGB")
+        img = np.array(image)
+        results = self.reader.readtext(img)
 
-    #     texts = [r[1] for r in results]
-    #     del img, results
-    #     gc.collect()
+        texts = [r[1] for r in results]
+        del img, results
+        gc.collect()
     
-    #     return "\n".join(texts)
+        return "\n".join(texts)
     # def _extract_text(self, image: Image.Image) -> str:
     #     try:
     #         text = pytesseract.image_to_string(
