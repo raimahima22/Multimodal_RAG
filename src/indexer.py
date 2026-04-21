@@ -196,7 +196,7 @@ class MultimodalIndexer:
 
     def index_document(self, pdf_path: str):
         start_doc = time.time()
-        images = pdf_to_images(pdf_path, dpi=300)
+        images = pdf_to_images(pdf_path)
         print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
 
         total_time = 0.0
