@@ -190,20 +190,20 @@ class MultimodalRetriever:
         if not hits:
             return []
 
-        # --- OCR once and cache ---
+        # OCR once and cache 
         ocr_texts = []
         for point in hits[:10]:
             text = self._ocr_page(point, generator)   # Still necessary unless you pre-compute
             ocr_texts.append(text)
 
-        # --- BM25 ---
+        # BM25 ---
         bm25 = BM25()
         bm25.fit(ocr_texts)
         query_tokens = tokenize(query)
 
         bm25_scores = [bm25.score(query_tokens, i) for i in range(len(hits))]
 
-        # --- Keyword, Phrase & Number signals ---
+        # Keyword, Phrase & Number signals ---
         query_lower = query.lower()
         content_words = set(query_lower.split()) - STOPWORDS
         query_numbers = extract_numbers(query_lower)
@@ -235,7 +235,7 @@ class MultimodalRetriever:
             page_numbers = extract_numbers(text_lower)
             number_scores.append(len(query_numbers & page_numbers) * 3.0)
 
-        # --- Combine scores using weighted sum (faster than RRF) ---
+        #Combine scores using weighted sum (faster than RRF) ---
         emb_scores = [p.score for p in hits]
 
         final_scores = []

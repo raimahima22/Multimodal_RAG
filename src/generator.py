@@ -5,7 +5,7 @@ from src.utils import pil_to_base64, pdf_to_images, get_pdf_page, clear_page_cac
 import os
 import torch
 import time
-import easyocr
+# import easyocr
 import gc
 # import tiktoken
 import numpy as np
@@ -38,24 +38,24 @@ class MultimodalGenerator:
         # )
 
         # self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
-        self.reader = easyocr.Reader(
-            ['en'],
-            gpu=torch.cuda.is_available(),
-            model_storage_directory="easyocr_models"
-        )
+        # self.reader = easyocr.Reader(
+        #     ['en'],
+        #     gpu=torch.cuda.is_available(),
+        #     model_storage_directory="easyocr_models"
+        # )
 
-        self.pdf_cache = {}
+        # self.pdf_cache = {}
     
-    def _extract_text(self, image: Image.Image) -> str:
-        image=image.convert("RGB")
-        img = np.array(image)
-        results = self.reader.readtext(img)
+    # def _extract_text(self, image: Image.Image) -> str:
+    #     image=image.convert("RGB")
+    #     img = np.array(image)
+    #     results = self.reader.readtext(img)
 
-        texts = [r[1] for r in results]
-        del img, results
-        gc.collect()
+    #     texts = [r[1] for r in results]
+    #     del img, results
+    #     gc.collect()
     
-        return "\n".join(texts)
+    #     return "\n".join(texts)
     # def _extract_text(self, image: Image.Image) -> str:
     #     try:
     #         text = pytesseract.image_to_string(
@@ -73,7 +73,7 @@ class MultimodalGenerator:
         start_gen = time.time()
         # 
         images = []
-        texts = []
+        # texts = []
 
         for point in retrieved_points:
             source = point.payload['source']
@@ -87,9 +87,9 @@ class MultimodalGenerator:
 
             images.append(page_img)
 
-            extracted_text = self._extract_text(page_img)
-            texts.append(extracted_text)
-        combined_text = "\n\n---\n\n".join(texts[:3])
+        #     extracted_text = self._extract_text(page_img)
+        #     texts.append(extracted_text)
+        # combined_text = "\n\n---\n\n".join(texts[:3])
 
         image_messages = [
             {
@@ -114,11 +114,6 @@ class MultimodalGenerator:
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
-
-        -------------------
-        CONTEXT:
-        {combined_text}
-        -------------------
 
         QUESTION:
         {query}
