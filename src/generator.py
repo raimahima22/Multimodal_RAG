@@ -1,7 +1,7 @@
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
-from src.utils import pil_to_base64, pdf_to_images
+from src.utils import pil_to_base64, pdf_to_images, get_pdf_page, clear_page_cache
 import os
 import torch
 import time
@@ -77,13 +77,13 @@ class MultimodalGenerator:
 
         for point in retrieved_points:
             source = point.payload['source']
-            page_num = point.payload.get('page_number')
+            page_num = point.payload.get('page_number', 0)
 
+             # single page load instead of full PDF
             if str(source).lower().endswith('.pdf'):
-                pages = pdf_to_images(source)
-                page_img = pages[page_num]
+                page_img = get_pdf_page(source, page_num)
             else:
-                page_img = Image.open(source)
+                page_img = Image.open(source).convert("RGB")
 
             images.append(page_img)
 

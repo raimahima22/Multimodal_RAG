@@ -5,7 +5,7 @@ import re
 import time
 import math
 from collections import defaultdict
-from src.utils import pdf_to_images
+from src.utils import pdf_to_images, get_pdf_page
 from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
@@ -132,8 +132,7 @@ class MultimodalRetriever:
         page_num = point.payload.get("page_number", 0)
         try:
             if source.lower().endswith(".pdf"):
-                pages = pdf_to_images(source)
-                img = pages[page_num]
+                img = get_pdf_page(source, page_num)
             else:
                 img = Image.open(source)
             text = generator._extract_text(img)
