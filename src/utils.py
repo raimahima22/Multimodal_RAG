@@ -3,6 +3,7 @@ from io import BytesIO
 from functools import lru_cache
 import fitz
 from PIL import Image
+import gc
 from pdf2image import convert_from_path
 
 # Global page-level cache: (pdf_path, page_num) -> PIL Image
