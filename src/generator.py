@@ -7,7 +7,7 @@ import torch
 import time
 import easyocr
 import gc
-# import pytesseract
+# import tiktoken
 import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
@@ -17,6 +17,7 @@ def aggressive_cleanup():
     
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
 
 
 class MultimodalGenerator:
@@ -90,25 +91,6 @@ class MultimodalGenerator:
             texts.append(extracted_text)
         combined_text = "\n\n---\n\n".join(texts[:5])
 
-
-        # b64_image = pil_to_base64(target_image)
-
-#         message = HumanMessage(
-#             content=[
-#                 {
-#                     "type": "text",
-#                     "text": f"""You are an expert document analyst. 
-# You are given both an image of a document and an OCR extracted text from the same image.
-# Use BOTH to answer accurately.
-
-# Question: {query}"""
-#                 },
-#                 {
-#                     "type": "image_url",
-#                     "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}
-#                 }
-#             ]
-#         )
         image_messages = [
             {
                 "type": "image_url",
@@ -124,6 +106,7 @@ class MultimodalGenerator:
                     "type": "text",
                     "text": f"""
         You are a helpful assistant. Please answer the user's question based on the provided context.
+        Answer ONLY using explicitly stated information. Do NOT infer shared rules unless clearly stated.
 
         Guidelines:
         - Answer clearly and concisely
@@ -150,6 +133,16 @@ class MultimodalGenerator:
 
         response = self.llm.invoke([message])
         gen_time = time.time() - start_gen
+
+        #token usage
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            usage = response.usage_metadata
+            print(f"Token Usage → Input: {usage.get('input_tokens', 'N/A')} | "
+                  f"Output: {usage.get('output_tokens', 'N/A')} | "
+                  f"Total: {usage.get('total_tokens', 'N/A')}")
+        else:
+            print("Token usage metadata not available.")
+
         print(f"Answer generation time: {gen_time:.2f} seconds")
         aggressive_cleanup()
         return response.content
