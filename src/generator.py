@@ -114,7 +114,9 @@ class MultimodalGenerator:
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
-
+        OCR TEXT:
+        {extracted_text}
+        
         QUESTION:
         {query}
 
