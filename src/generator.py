@@ -105,12 +105,12 @@ class MultimodalGenerator:
                 {
                     "type": "text",
                     "text": f"""
-        You are a helpful assistant. Please answer the user's question based on the provided context.
+        You are a professional document analyst. Please answer the user's question based on the provided context.
         Answer ONLY using explicitly stated information. Do NOT infer shared rules unless clearly stated.
 
         Guidelines:
         - Answer clearly and concisely
-        - Be polite and natural in your response
+        - Be natural and professional 
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
