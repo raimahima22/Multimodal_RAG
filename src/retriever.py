@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import gc
 import re
-from qdrant_client.models import GroupBy
+# from qdrant_client.models import GroupBy
 import time
 import math
 from collections import defaultdict
