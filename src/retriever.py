@@ -167,9 +167,9 @@ class MultimodalRetriever:
         num_query_tokens = query_emb_array.shape[0]
         for point in results:
             if point.score is not None:
-                # point.score = point.score / num_query_tokens
-                page_tokens = point.payload.get("num_patches", 1)
-                point.score = point.score / (num_query_tokens * np.log1p(page_tokens))
+                point.score = point.score / num_query_tokens
+                # page_tokens = point.payload.get("num_patches", 1)
+                # point.score = point.score / (num_query_tokens * np.log1p(page_tokens))
 
         print(f"Qdrant retrieval done in {time.time() - start_search:.2f}s | Candidates: {len(results)}")
 

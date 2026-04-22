@@ -81,7 +81,7 @@ class MultimodalGenerator:
 
              # single page load instead of full PDF
             if str(source).lower().endswith('.pdf'):
-                page_img = get_pdf_page(source, page_num)
+                page_img = get_pdf_page(source, page_num, dpi=300)
             else:
                 page_img = Image.open(source).convert("RGB")
 
@@ -89,7 +89,7 @@ class MultimodalGenerator:
 
             extracted_text = self._extract_text(page_img)
             texts.append(extracted_text)
-        combined_text = "\n\n---\n\n".join(texts[:3])
+        combined_text = "\n\n---\n\n".join(texts)
 
         image_messages = [
             {

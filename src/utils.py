@@ -6,10 +6,11 @@ from PIL import Image
 import gc
 from pdf2image import convert_from_path
 
+RAG_DPI = 300
 # Global page-level cache: (pdf_path, page_num) -> PIL Image
 _page_cache = {}
 
-def get_pdf_page(pdf_path: str, page_num: int, dpi: int = 150) -> Image.Image:
+def get_pdf_page(pdf_path: str, page_num: int, dpi: int = RAG_DPI) -> Image.Image:
     """Load a single page from a PDF, with caching."""
     key = (pdf_path, page_num)
     if key in _page_cache:
@@ -38,7 +39,7 @@ def pdf_to_images(pdf_path):
 def pil_to_base64(image):
     # Encodes PIL image to base64 for LLM transmission
     buffered = BytesIO()
-    image.save(buffered, format="JPEG")
+    image.save(buffered, format="JPEG", quality=90)
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # In src/utils.py
