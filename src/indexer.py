@@ -57,7 +57,7 @@ class MultimodalIndexer:
         self.collection_name = collection_name
         self.model_name = "vidore/colqwen2.5-v0.2"
 
-        self.chunk_size = 768
+        self.chunk_size = 512
         self.overlap = 128
         self.stride = self.chunk_size - self.overlap
 
