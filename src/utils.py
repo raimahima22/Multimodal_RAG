@@ -6,7 +6,7 @@ from PIL import Image
 import gc
 from pdf2image import convert_from_path
 
-RAG_DPI = 300
+RAG_DPI = 400
 # Global page-level cache: (pdf_path, page_num) -> PIL Image
 _page_cache = {}
 
@@ -34,7 +34,7 @@ def clear_page_cache():
 
 def pdf_to_images(pdf_path):
     # Converts PDF pages to PIL Images
-    return convert_from_path(pdf_path, dpi=300)
+    return convert_from_path(pdf_path, dpi=RAG_DPI)
 
 def pil_to_base64(image):
     # Encodes PIL image to base64 for LLM transmission

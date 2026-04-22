@@ -109,8 +109,8 @@ class MultimodalGenerator:
         Answer ONLY using explicitly stated information. Do NOT infer shared rules unless clearly stated.
 
         Guidelines:
-        - Answer clearly and concisely
-        - Be natural and professional 
+        - Answer clearly, concisely and directly. Do NOT explain your reasoning process or compare different plans unless specifically asked to do so.
+        - Be natural and professional
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
