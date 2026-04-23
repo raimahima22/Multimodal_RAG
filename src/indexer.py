@@ -62,7 +62,7 @@ class MultimodalIndexer:
         self.stride = self.chunk_size - self.overlap
 
         print(f"Loading model  → {self.model_name}")
-        # print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
+        print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
         
 
