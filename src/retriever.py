@@ -7,6 +7,7 @@ import math
 from collections import defaultdict
 from functools import lru_cache
 from src.utils import pdf_to_images
+from src.utils import get_pdf_page, clear_page_cache
 from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
@@ -202,32 +203,42 @@ class MultimodalRetriever:
     # ------------------------------------------------------------------
 
     def _ocr_page(self, point, generator) -> str:
-        """
-        OCR a page from a point's payload, with an in-memory cache.
-        Repeated calls for the same (source, page_number) return instantly.
-        """
         source: str = point.payload.get("source", "")
         page_num: int = point.payload.get("page_number", 0)
         cache_key = (source, page_num)
 
+    #  OCR cache hit
         if cache_key in self._ocr_cache:
             return self._ocr_cache[cache_key]
 
         try:
             if source.lower().endswith(".pdf"):
-                pages = pdf_to_images(source)
-                img = pages[page_num]
+            #  ONLY LOAD ONE PAGE (CRITICAL FIX)
+                img = get_pdf_page(source, page_num)
             else:
                 img = Image.open(source)
 
+        # Optional: downscale to reduce RAM
+            img = img.resize((1024, 1024))
+
             text = generator._extract_text(img)
-            print(f"  OCR: Page {page_num} → {len(text)} chars extracted")
+            print(f"  OCR: Page {page_num} → {len(text)} chars")
+
         except Exception as e:
             print(f"  OCR failed for page {page_num}: {e}")
             text = ""
 
+    #  Limit OCR cache size (prevents RAM leak)
+        if len(self._ocr_cache) > 100:
+            self._ocr_cache.clear()
+
         self._ocr_cache[cache_key] = text
-        return text
+
+    #  Free memory immediately
+       del img
+       aggressive_cleanup()
+
+       return text
 
     # ------------------------------------------------------------------
     # Public: search
