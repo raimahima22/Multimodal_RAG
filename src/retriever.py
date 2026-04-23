@@ -7,6 +7,13 @@ from src.utils import pdf_to_images
 from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
+STOPWORDS = {
+    "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
+    "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
+    "when", "where", "who", "which", "do", "does", "did", "was", "were",
+    "be", "been", "being", "has", "have", "had", "by", "from", "about",
+}
+ 
 
 
 
@@ -19,6 +26,68 @@ def to_numpy(x):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
+def tokenize(text: str) -> list[str]:
+    """Lowercase, split on non-alphanumeric, remove stopwords."""
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return [t for t in tokens if t not in STOPWORDS]
+ 
+ 
+def extract_numbers(text: str) -> set[str]:
+    """Pull raw numeric strings from text (integers, decimals, percentages)."""
+    return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
+
+
+class BM25:
+    """
+    Fit on a small corpus of OCR'd page texts, then score
+    each document against a query.
+    """
+
+
+    def __init__(self, k1 = 1.5, b:float = 0.75):
+        self.k1 = k1 #term saturation
+        self.b = b #length normalization
+        self.corpus_size = 0
+        self.avgdl = 0.0
+        self.doc_freqs: list[dict] = [] #count term frequency per document
+        self.idf: dict[str, float] = {} #idf per term
+        self.doc_lens: list[int] = [] #number of tokens per document
+   
+    def fit(self, corpus:list[str]):
+        """corpus: list of raw page texts."""
+        tokenized = [tokenize (doc) for doc in corpus] #tokenize corpus
+        self.corpus_size = len(tokenized) #corpus size calculate
+        self.doc_lens = [len(d) for d in tokenized] #document lengths
+        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
+        self.doc_freqs = []
+        #compute term frequencies + document frequencies
+        df:dict[str, int] = defaultdict(int)
+        for doc in tokenized:
+            freq: dict[str, int] = defaultdict(int)
+            for tok in doc:
+                freq[tok] += 1
+            self.doc_freqs.append(dict(freq))
+            for tok in set(doc):
+                df[tok] += 1
+        #compute IDF
+        for term, n in df.items():
+            self.idf[term] = math.log(
+                (self.corpus_size - n + 0.5) / (n + 0.5) + 1
+            )
+    def score(self, query_tokens: list[str], doc_idx: int) -> float:
+        score = 0.0
+        dl = self.doc_lens[doc_idx]
+        freq_map = self.doc_freqs[doc_idx]
+        #iterate query tokens
+        for tok in query_tokens:
+            if tok not in freq_map:
+                continue
+            f = freq_map[tok]
+            idf = self.idf.get(tok, 0.0)
+            num = f * (self.k1 + 1) #boosts repeated terms
+            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl)) #penalizes long documents
+            score += idf * num / den
+        return score
 
 class MultimodalRetriever:
     def __init__(self, indexer):
