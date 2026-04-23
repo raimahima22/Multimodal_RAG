@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import gc
+import re
 import time
 from collections import defaultdict
 from src.utils import pdf_to_images
