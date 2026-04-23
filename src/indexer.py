@@ -100,7 +100,7 @@ class MultimodalIndexer:
         # Detect embedding dimension
         print(" Detecting embedding dimension...")
         with torch.no_grad():
-            dummy_img = Image.new("RGB", (896, 896))
+            dummy_img = Image.new("RGB", (224, 224))
             inputs = self.processor.process_images([dummy_img]).to(self.device)
             outputs = self.model(**inputs)
             embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
