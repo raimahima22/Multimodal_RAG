@@ -235,10 +235,10 @@ class MultimodalRetriever:
         self._ocr_cache[cache_key] = text
 
     #  Free memory immediately
-       del img
-       aggressive_cleanup()
+        del img
+        aggressive_cleanup()
 
-       return text
+        return text
 
     # ------------------------------------------------------------------
     # Public: search
