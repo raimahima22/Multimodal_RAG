@@ -155,8 +155,6 @@ class MultimodalIndexer:
                 embeddings = outputs[0]
             else:
                 embeddings = outputs  # fallback (should not reach here)
-
-            
         
             embeddings = to_numpy(embeddings)
     
@@ -168,12 +166,7 @@ class MultimodalIndexer:
 
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
-        
-        # multi_vector = self._extract_image_embeddings(pil_img)
-
-        # # Use a deterministic ID
-        # point_id = abs(hash(f"{source}_page_{page_num}")) % (10**15)
-        w,h = pil_img.size
+        w, h = pil_img.size
         points = []
 
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
