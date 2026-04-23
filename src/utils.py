@@ -39,7 +39,7 @@ def pdf_to_images(pdf_path):
 def pil_to_base64(image):
     # Encodes PIL image to base64 for LLM transmission
     buffered = BytesIO()
-    image.save(buffered, format="JPEG", quality=90)
+    image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # In src/utils.py
