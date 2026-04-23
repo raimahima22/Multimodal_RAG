@@ -3,6 +3,7 @@ import numpy as np
 import gc
 import re
 import time
+import math
 from collections import defaultdict
 from src.utils import pdf_to_images
 from PIL import Image
