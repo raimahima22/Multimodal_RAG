@@ -2,354 +2,287 @@ import torch
 import numpy as np
 import gc
 import time
+import re
+import math
 from collections import defaultdict
-from src.utils import pdf_to_images
-from PIL import Image
-from qdrant_client.models import Filter, FieldCondition, MatchText
 
+from PIL import Image
+from src.utils import get_pdf_page, clear_page_cache
+
+# -----------------------------
+# GLOBAL CACHES
+# -----------------------------
+_ocr_cache = {}
 
 STOPWORDS = {
-    "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
-    "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
-    "when", "where", "who", "which", "do", "does", "did", "was", "were",
-    "be", "been", "being", "has", "have", "had", "by", "from", "about",
+    "what","is","are","the","a","an","of","in","on","at","to",
+    "for","with","and","or","it","its","this","that","how","why",
+    "when","where","who","which","do","does","did","was","were",
+    "be","been","being","has","have","had","by","from","about",
 }
- 
 
+# -----------------------------
+# UTILS
+# -----------------------------
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
 def to_numpy(x):
     if isinstance(x, torch.Tensor):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
- 
-def tokenize(text: str) -> list[str]:
-    """Lowercase, split on non-alphanumeric, remove stopwords."""
+def tokenize(text: str):
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
- 
- 
-def extract_numbers(text: str) -> set[str]:
-    """Pull raw numeric strings from text (integers, decimals, percentages)."""
+
+def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
 
-class BM25:
-    """
-    Fit on a small corpus of OCR'd page texts, then score 
-    each document against a query.
-    """
 
-    def __init__(self, k1 = 1.5, b:float = 0.75):
+# -----------------------------
+# BM25 (lightweight)
+# -----------------------------
+class BM25:
+    def __init__(self, k1=1.5, b=0.75):
         self.k1 = k1
         self.b = b
-        self.corpus_size = 0
-        self.avgdl = 0.0
-        self.doc_freqs: list[dict] = [] #count per document
-        self.idf: dict[str, float] = {}
-        self.doc_lens: list[int] = []
-    
-    def fit(self, corpus:list[str]):
-        """corpus: list of raw page texts."""
-        tokenized = [tokenize (doc) for doc in corpus]
-        self.corpus_size = len(tokenized)
-        self.doc_lens = [len(d) for d in tokenized]
-        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
-        self.doc_freqs = []
 
-        df:dict[str, int] = defaultdict(int)
-        for doc in tokenized:
-            freq: dict[str, int] = defaultdict(int)
+    def fit(self, corpus):
+        self.tokenized = []
+        for doc in corpus:
+            self.tokenized.append(tokenize(doc))
+
+        self.corpus_size = len(self.tokenized)
+        self.doc_lens = [len(d) for d in self.tokenized]
+        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
+
+        self.doc_freqs = []
+        df = defaultdict(int)
+
+        for doc in self.tokenized:
+            freq = defaultdict(int)
             for tok in doc:
                 freq[tok] += 1
             self.doc_freqs.append(dict(freq))
+
             for tok in set(doc):
                 df[tok] += 1
- 
+
+        self.idf = {}
         for term, n in df.items():
             self.idf[term] = math.log(
                 (self.corpus_size - n + 0.5) / (n + 0.5) + 1
             )
-    def score(self, query_tokens: list[str], doc_idx: int) -> float:
+
+    def score(self, query_tokens, idx):
         score = 0.0
-        dl = self.doc_lens[doc_idx]
-        freq_map = self.doc_freqs[doc_idx]
+        dl = self.doc_lens[idx]
+        freq_map = self.doc_freqs[idx]
+
         for tok in query_tokens:
             if tok not in freq_map:
                 continue
+
             f = freq_map[tok]
             idf = self.idf.get(tok, 0.0)
-            num = f * (self.k1 + 1)
-            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
-            score += idf * num / den
+
+            score += idf * (
+                f * (self.k1 + 1)
+                / (f + self.k1 * (1 - self.b + self.b * dl / self.avgdl))
+            )
+
         return score
 
+
+# -----------------------------
+# RETRIEVER
+# -----------------------------
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-
-    def _extract_text_embedding(self, query_text: str):
-        """Extract multi-vector text embedding for ColQwen2.5"""
+    # -------------------------
+    # EMBEDDING
+    # -------------------------
+    def _extract_text_embedding(self, query_text):
         start = time.time()
-   
-        inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
-   
+
+        inputs = self.indexer.processor.process_queries([query_text]).to(
+            self.indexer.device
+        )
+
         with torch.no_grad():
             outputs = self.indexer.model(**inputs)
-       
-            # ColQwen2.5 specific
-            if hasattr(outputs, "query_embeds") and outputs.query_embeds is not None:
+
+            if hasattr(outputs, "query_embeds"):
                 embedding = to_numpy(outputs.query_embeds[0])
-            elif hasattr(outputs, "query_embeddings") and outputs.query_embeddings is not None:
+            elif hasattr(outputs, "query_embeddings"):
                 embedding = to_numpy(outputs.query_embeddings[0])
-            elif isinstance(outputs, torch.Tensor):
-                embedding = to_numpy(outputs[0])
             else:
-                embedding = to_numpy(outputs)  # last resort
-       
-        # L2 normalize each token vector (ColQwen2.5 expects this)
+                embedding = to_numpy(outputs[0])
+
+            # ✅ in-place normalization
             norms = np.linalg.norm(embedding, axis=1, keepdims=True)
-            norms[norms == 0] = 1.0
-            embedding = embedding / norms
-   
-        embed_time = time.time() - start
-        print(f"Query embedded in {embed_time:.3f}s | Tokens: {embedding.shape[0]}")
-   
+            embedding /= np.maximum(norms, 1e-8)
+
         del inputs, outputs
         aggressive_cleanup()
-        return embedding, embed_time
-    
-    def _ocr_page(self, point, generator) -> str:
-        """OCR a page from a point's payload using generator's EasyOCR reader."""
+
+        print(f"Embedding done | tokens={embedding.shape[0]} | {time.time()-start:.2f}s")
+
+        return embedding
+
+    # -------------------------
+    # OCR WITH CACHE
+    # -------------------------
+    def _ocr_page(self, point, generator):
         source = point.payload.get("source", "")
         page_num = point.payload.get("page_number", 0)
+
+        key = (source, page_num)
+        if key in _ocr_cache:
+            return _ocr_cache[key]
+
         try:
             if source.lower().endswith(".pdf"):
-                pages = pdf_to_images(source)
-                img = pages[page_num]
+                img = get_pdf_page(source, page_num)
             else:
                 img = Image.open(source)
+
             text = generator._extract_text(img)
-            print(f"  OCR: Page {page_num} → {len(text)} chars extracted")
+
+            # free memory
+            if hasattr(img, "close"):
+                img.close()
+            del img
+
+            _ocr_cache[key] = text
             return text
+
         except Exception as e:
-            print(f"  OCR failed for page {page_num}: {e}")
+            print(f"OCR failed: {e}")
             return ""
 
+    # -------------------------
+    # SEARCH
+    # -------------------------
+    def search(self, query_text, top_k=5, generator=None):
+        query_vec = self._extract_text_embedding(query_text)
+        num_tokens = query_vec.shape[0]
 
-    def search(self, query_text: str, top_k: int = 15, source_filter: str = None, generator=None):
-        start_search = time.time()
-       
-        # 1. Get multi-vector query embedding
-        query_emb_array, embed_time = self._extract_text_embedding(query_text)
-        num_query_tokens = query_emb_array.shape[0]
-       
-        query_multi_vec = query_emb_array.tolist()
-
-
-        # 2. Optional source filter
-        query_filter = None
-        if source_filter:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="source",
-                        match=MatchText(text=source_filter.lower())
-                    )
-                ]
-            )
-
-
-        # 3. Query Qdrant (Multi-vector late interaction)
-        retr_start = time.time()
+        # retrieve candidates
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
-            query=query_multi_vec,
-            using="image",                   # vector name used during indexing
-            query_filter=query_filter,
-            limit=top_k,
-            score_threshold=None,             # lowered a bit for ColQwen2.5
+            query=query_vec.tolist(),
+            using="image",
+            limit=top_k * 3,
         ).points
-        retr_time = time.time() - retr_start
 
+        # normalize scores
+        for p in results:
+            if p.score:
+                p.score /= num_tokens
 
-        # Average score by number of query tokens (common practice)
-        for point in results:
-            if hasattr(point, 'score') and point.score is not None:
-                point.score = point.score / num_query_tokens
+        # group by page
+        page_best = {}
+        for p in results:
+            key = (p.payload.get("source"), p.payload.get("page_number"))
+            if key not in page_best or p.score > page_best[key].score:
+                page_best[key] = p
 
+        candidates = list(page_best.values())
+        candidates.sort(key=lambda x: x.score, reverse=True)
 
-        # Group by page and keep best score per page
-        page_best = defaultdict(lambda: {"score": -1.0, "point": None})
-        for point in results:
-            key = (point.payload.get("source"), point.payload.get("page_number"))
-            if point.score > page_best[key]["score"]:
-                page_best[key] = {"score": point.score, "point": point}
+        # reduce candidates
+        candidates = candidates[:6]
 
+        print("\nInitial Candidates:")
+        for i, p in enumerate(candidates, 1):
+            print(i, p.payload.get("page_number"), f"{p.score:.4f}")
 
-        # sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
-        # top_results = [item["point"] for item in sorted_pages[:5]]
-        sorted_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
-
-
-        # get more candidates before reranking
-        initial_hits = [item["point"] for item in sorted_pages[:10]]
-
-        print("\n Initial Candidates (before reranking):")
-        for i, p in enumerate(initial_hits, 1):
-            src = p.payload.get("source", "unknown")
-            pg = p.payload.get("page_number", "?")
-            score = p.score
-            print(f"  {i}. {src} (Page {pg}) — score={score:.4f}")      
-        # 5. Rerank (MANDATORY)
+        # rerank
         if generator:
-            final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
+            final = self.rerank(query_text, candidates, generator, top_k)
         else:
-            final_hits = initial_hits[:3]
+            final = candidates[:top_k]
 
-        print("\n Top Retrieved Pages:")
-        for i, p in enumerate(final_hits, 1):
-            src = p.payload.get("source", "unknown")
-            pg = p.payload.get("page_number", "?")
-            score = p.score
-            print(f"{i}. {src} (Page {pg}) — score={score:.4f}")
-
-
+        clear_page_cache()
         aggressive_cleanup()
-        return final_hits
 
-    def rerank_hits(self, query: str, hits, generator, top_k: int = 3):
-        """
-        Multi-signal hybrid reranker.
- 
-        Signals
-        -------
-        1.  ColQwen2.5 late-interaction embedding score  (semantic)
-        2.  BM25 on OCR text                             (lexical, tf-idf weighted)
-        3.  Exact / partial keyword match                (surface form)
-        4.  N-gram phrase match (bi/trigram)             (phrase precision)
-        5.  Numeric / entity exact match                 (critical for tables, stats)
- 
-        Fusion: Reciprocal Rank Fusion (RRF) across all signals.
-        """
+        return final
+
+    # -------------------------
+    # RERANK
+    # -------------------------
+    def rerank(self, query, hits, generator, top_k=3):
         if not hits:
             return []
- 
-        # ── 0. OCR every candidate page ──────────────────────────────────────
-        ocr_texts: list[str] = []
-        valid_hits = []
-        for point in hits:
-            text = self._ocr_page(point, generator)
-            ocr_texts.append(text)
-            valid_hits.append(point)
- 
-        # ── 1. BM25 on OCR corpus ─────────────────────────────────────────────
+
+        ocr_texts = []
+        for p in hits:
+            ocr_texts.append(self._ocr_page(p, generator))
+
+        # BM25
         bm25 = BM25()
         bm25.fit(ocr_texts)
+
         query_tokens = tokenize(query)
- 
-        bm25_scores = [
-            bm25.score(query_tokens, i) for i in range(len(valid_hits))
-        ]
- 
-        # ── 2. Keyword signals ────────────────────────────────────────────────
-        query_lower = query.lower()
-        raw_query_words = set(query_lower.split())
-        content_words = raw_query_words - STOPWORDS  # only meaningful terms
- 
-        # numbers / numeric entities mentioned in the query
-        query_numbers = extract_numbers(query_lower)
-        query_tokens_raw = query_lower.split()
- 
-        keyword_scores: list[float] = []
-        phrase_scores: list[float] = []
-        number_scores: list[float] = []
- 
-        for text in ocr_texts:
+        query_numbers = extract_numbers(query.lower())
+        content_words = set(query_tokens)
+
+        bm25_scores = []
+        keyword_scores = []
+        number_scores = []
+
+        for i, text in enumerate(ocr_texts):
             text_lower = text.lower()
-            page_words = text_lower.split()
- 
-            # 2a. Exact content-word matches (stopwords stripped)
-            exact = sum(1 for w in content_words if w in text_lower)
- 
-            # 2b. Partial / substring matches for content words
-            partial = sum(
-                1 for w in content_words
-                if any(w in tok for tok in page_words)
-                and w not in text_lower  # not already counted as exact
-            )
- 
-            keyword_scores.append(exact * 2.0 + partial * 0.5)
- 
-            # 2c. N-gram phrase match (2- and 3-word phrases, no stopwords filter)
-            phrase_bonus = 0.0
-            for n in (2, 3):
-                for i in range(len(query_tokens_raw) - n + 1):
-                    phrase = " ".join(query_tokens_raw[i : i + n])
-                    if phrase in text_lower:
-                        phrase_bonus += n * 2.0   # longer phrase = stronger signal
-            phrase_scores.append(phrase_bonus)
- 
-            # 2d. Numeric / entity exact match
-            #     Answers to "what is the value of X" almost always contain the number.
+            text_set = set(text_lower.split())
+
+            # BM25
+            bm25_scores.append(bm25.score(query_tokens, i))
+
+            # keyword
+            exact = len(content_words & text_set)
+            keyword_scores.append(exact * 2.0)
+
+            # numbers
             if query_numbers:
-                page_numbers = extract_numbers(text_lower)
-                matched = len(query_numbers & page_numbers)
-                number_scores.append(matched * 3.0)
+                page_nums = extract_numbers(text_lower)
+                number_scores.append(len(query_numbers & page_nums) * 3.0)
             else:
                 number_scores.append(0.0)
- 
-        # ── 3. Reciprocal Rank Fusion (RRF) ───────────────────────────────────
-        # k=60 is the standard RRF constant
-        def rrf_ranks(scores: list[float], k: int = 60) -> list[float]:
+
+        def rrf(scores, k=60):
             order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
             ranks = [0.0] * len(scores)
             for rank, idx in enumerate(order):
                 ranks[idx] = 1.0 / (k + rank + 1)
             return ranks
- 
-        emb_scores = [p.score for p in valid_hits]
-        rrf_emb    = rrf_ranks(emb_scores)
-        rrf_bm25   = rrf_ranks(bm25_scores)
-        rrf_kw     = rrf_ranks(keyword_scores)
-        rrf_phrase = rrf_ranks(phrase_scores)
-        rrf_num    = rrf_ranks(number_scores)
- 
-        # Signal weights — tune based on your document types.
-        # For dense-text docs raise w_bm25; for tables/figures raise w_num.
-        w_emb    = 0.30
-        w_bm25   = 0.25
-        w_kw     = 0.20
-        w_phrase = 0.15
-        w_num    = 0.10
- 
-        scored = []
-        for i, point in enumerate(valid_hits):
-            final = (
-                w_emb    * rrf_emb[i]
-                + w_bm25   * rrf_bm25[i]
-                + w_kw     * rrf_kw[i]
-                + w_phrase * rrf_phrase[i]
-                + w_num    * rrf_num[i]
+
+        emb_scores = [p.score for p in hits]
+
+        rrf_final = []
+        for i, p in enumerate(hits):
+            score = (
+                0.4 * rrf(emb_scores)[i] +
+                0.3 * rrf(bm25_scores)[i] +
+                0.2 * rrf(keyword_scores)[i] +
+                0.1 * rrf(number_scores)[i]
             )
- 
-            pg = point.payload.get("page_number", "?")
-            print(
-                f"  Page {pg} | emb={emb_scores[i]:.4f} | "
-                f"bm25={bm25_scores[i]:.3f} | kw={keyword_scores[i]:.2f} | "
-                f"phrase={phrase_scores[i]:.2f} | num={number_scores[i]:.2f} | "
-                f"RRF={final:.5f}"
-            )
- 
-            # Store the fused score back on the point so callers can read it
-            point.score = final
-            scored.append((final, point))
- 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        final_hits = [p for _, p in scored[:top_k]]
- 
-        print(f"\n Reranking done: {len(hits)} candidates → {len(final_hits)} selected")
-        return final_hits
+
+            p.score = score
+            rrf_final.append((score, p))
+
+        del ocr_texts
+        gc.collect()
+
+        rrf_final.sort(key=lambda x: x[0], reverse=True)
+
+        print("\nFinal Reranked:")
+        for s, p in rrf_final:
+            print(p.payload.get("page_number"), f"{s:.5f}")
+
+        return [p for _, p in rrf_final[:top_k]]
