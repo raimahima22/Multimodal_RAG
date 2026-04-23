@@ -156,8 +156,7 @@ class MultimodalIndexer:
             else:
                 embeddings = outputs  # fallback (should not reach here)
 
-            norms = torch.norm(embeddings, p=2, dim=-1, keepdim=True)
-            embeddings = embeddings / norms.clamp(min=1e-6)
+            
         
             embeddings = to_numpy(embeddings)
     
