@@ -50,29 +50,22 @@ class GroqLLMWrapper:
         self.llm = create_llm(self.keys[self.current_key_index])
         return True
 
-    def invoke(self, messages, retries=3):
-        attempt = 0
+    def invoke(self, messages):
+        try:
+            return self.llm.invoke(messages)
 
-        while attempt <= retries:
-            try:
-                return self.llm.invoke(messages)
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                print(" Rate limit hit → trying next key")
 
-            except RateLimitError as e:
-                print(" Rate limit hit")
-
-                # Try switching key first
                 if self.switch_key():
-                    continue
+                    return self.llm.invoke(messages)
 
-                # No keys left → wait
-                wait_time = extract_wait_time(str(e))
-                print(f" Waiting {wait_time:.2f}s before retry...")
-                time.sleep(wait_time)
+                print(" All API keys exhausted → skipping request")
+                raise RuntimeError("RATE_LIMIT_EXHAUSTED")
 
-                attempt += 1
-
-        raise Exception(" Failed after retries due to rate limits.")
-
+            raise e
+            
 load_dotenv('/content/drive/MyDrive/.env')
 def aggressive_cleanup():
     
