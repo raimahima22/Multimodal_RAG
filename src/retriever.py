@@ -266,10 +266,10 @@ class MultimodalRetriever:
             print(
                 f"Page {p.payload.get('page_number','?')} | "
                 f"emb={emb_scores[i]:.3f} | "
-                f"bm25={bm25[i]:.3f} | "
-                f"kw={kw[i]:.3f} | "
-                f"phrase={ph[i]:.3f} | "
-                f"num={num[i]:.3f} | "
+                f"bm25={bm25_scores[i]:.3f} | "
+                f"kw={keyword_scores[i]:.3f} | "
+                f"phrase={phrase_scores[i]:.3f} | "
+                f"num={number_scores[i]:.3f} | "
                 f"FINAL={score:.5f}"
             )
 
