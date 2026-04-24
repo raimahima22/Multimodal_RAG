@@ -1,19 +1,37 @@
+import transformers.integrations.peft as _ti
+
+_original_convert = _ti._convert_peft_config_moe
+
+def _patched_convert_peft_config_moe(peft_config, model_type):
+    mapping = getattr(_ti, '_MOE_TARGET_MODULE_MAPPING', {})
+    if model_type not in mapping:
+        return peft_config  # not a known MoE model — skip conversion entirely
+    return _original_convert(peft_config, model_type)
+
+_ti._convert_peft_config_moe = _patched_convert_peft_config_moe
+
 import torch
 import gc
 import numpy as np
 import time
 from pathlib import Path
 from PIL import Image
-import fitz
-
+import shutil
+# import pytesseract
+from src.utils import pdf_to_images
+import re
+import sys
+from transformers.utils.import_utils import is_flash_attn_2_available
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Distance, VectorParams, PointStruct,
-    MultiVectorConfig, MultiVectorComparator,
+    Distance,
+    VectorParams,
+    PointStruct,
+    MultiVectorConfig,
+    MultiVectorComparator,
 )
-
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
-from transformers.utils.import_utils import is_flash_attn_2_available
+from transformers import AutoProcessor
 
 
 def aggressive_cleanup():
@@ -21,14 +39,21 @@ def aggressive_cleanup():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+def to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().to(torch.float32).cpu().numpy()
+    return np.asarray(x, dtype=np.float32)
+
+
+def l2_normalize(x):
+    norms = np.linalg.norm(x, axis=1, keepdims=True)
+    return x / np.clip(norms, 1e-8, None)
+
 
 class MultimodalIndexer:
-
     def __init__(self, collection_name="mrag_collection", force_recreate=False):
-
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
-
+        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
         self.collection_name = collection_name
         self.model_name = "vidore/colqwen2.5-v0.2"
 
@@ -36,18 +61,19 @@ class MultimodalIndexer:
         self.overlap = 96
         self.stride = self.chunk_size - self.overlap
 
-        self.BATCH_SIZE = 64   # 🔥 increase if VRAM allows
-        self.UPSERT_BATCH = 256
+        print(f"Loading model  → {self.model_name}")
+        print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
-        print(f"Loading model → {self.model_name}")
+        
 
         self.model = ColQwen2_5.from_pretrained(
             self.model_name,
-            torch_dtype=self.dtype,
+            torch_dtype=self.torch_dtype,
             trust_remote_code=True,
+            # low_cpu_mem_usage=True,
             device_map="auto",
-            attn_implementation="flash_attention_2"
-            if is_flash_attn_2_available() else None,
+            attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
+    
         ).eval()
 
         self.processor = ColQwen2_5_Processor.from_pretrained(
@@ -55,34 +81,35 @@ class MultimodalIndexer:
             trust_remote_code=True
         )
 
-        self.client = QdrantClient(path="/content/drive/MyDrive/qdrant_db")
+        print("Model and processor loaded successfully.")
+
+        self.local_client = QdrantClient(path="/content/drive/MyDrive/qdrant_db")
 
         if force_recreate:
-            self.client.recreate_collection(
-                collection_name=self.collection_name,
-                vectors_config=self._get_vector_config()
-            )
+            self._recreate_collection()
         else:
-            if not self.client.collection_exists(self.collection_name):
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=self._get_vector_config()
-                )
+            self._setup_collection()
 
-    # -------------------------
 
-    def _get_vector_config(self):
-        dummy = Image.new("RGB", (224, 224))
-        inputs = self.processor.process_images([dummy]).to(self.device)
+    def _setup_collection(self):
+        if self.local_client.collection_exists(self.collection_name):
+            print(f" Using existing collection: {self.collection_name}")
+            print(self.local_client.get_collection(self.collection_name))
+            return
 
+        # Detect embedding dimension
+        print(" Detecting embedding dimension...")
         with torch.no_grad():
-            out = self.model(**inputs)
+            dummy_img = Image.new("RGB", (224, 224))
+            inputs = self.processor.process_images([dummy_img]).to(self.device)
+            outputs = self.model(**inputs)
+            embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
 
-        dim = out.image_embeds.shape[-1]
+        print(f"Embedding dim: {embed_dim}")
 
-        return {
+        vectors_config = {
             "image": VectorParams(
-                size=dim,
+                size=embed_dim,
                 distance=Distance.COSINE,
                 multivector_config=MultiVectorConfig(
                     comparator=MultiVectorComparator.MAX_SIM
@@ -90,129 +117,142 @@ class MultimodalIndexer:
             )
         }
 
-    # -------------------------
+        self.local_client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config=vectors_config
+        )
+        print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
-    def _get_coords(self, w, h):
-        xs = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
-        ys = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
+    def is_collection_empty(self) -> bool:
+        if not self.local_client.collection_exists(self.collection_name):
+            return True
+        try:
+            info = self.local_client.get_collection(self.collection_name)
+            if info.points_count == 0:
+                return True
+            
+            points, _ = self.local_client.scroll(
+                collection_name=self.collection_name, limit=3, with_vectors=False
+            )
+            return len(points) == 0
+        except Exception as e:
+            print(f"Error checking collection: {e}")
+            return True
 
-        if xs[-1] + self.chunk_size < w:
-            xs.append(w - self.chunk_size)
-        if ys[-1] + self.chunk_size < h:
-            ys.append(h - self.chunk_size)
+    def _extract_image_embeddings(self, pil_img: Image.Image) -> np.ndarray:
+        start = time.time()
+        pil_img = pil_img.convert("RGB")
+    
+        inputs = self.processor.process_images([pil_img]).to(self.device)
+    
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+            #ColQwen2.5 specific: model directly returns the multi-vector
+            if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
+                embeddings = outputs.image_embeds[0]          # batch=1
+            elif isinstance(outputs, torch.Tensor):
+                embeddings = outputs[0]
+            else:
+                embeddings = outputs  # fallback (should not reach here)
+        
+            embeddings = to_numpy(embeddings)
+    
+        print(f" → {embeddings.shape[0]} tokens | Time: {time.time() - start:.3f}s")
+    
+        del inputs, outputs
+        aggressive_cleanup()
+        return embeddings
 
-        return [(x, y) for y in ys for x in xs]
+    def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
+        start_page = time.time()
+        w, h = pil_img.size
+        points = []
 
-    # -------------------------
+        y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
+        if y_coords and y_coords[-1] + self.chunk_size < h:
+            y_coords.append(h - self.chunk_size)
 
-    def _process_page(self, img, source, page_num):
+        x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
+        if x_coords and x_coords[-1] + self.chunk_size < w:
+            x_coords.append(w - self.chunk_size)
 
-        t0 = time.time()
+        y_coords = sorted(set(y_coords))
+        x_coords = sorted(set(x_coords))
 
-        w, h = img.size
-        coords = self._get_coords(w, h)
+        for y in y_coords:
+            for x in x_coords:
+                patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
+                multi_vector = self._extract_image_embeddings(patch)
 
-        # ✅ STEP 1: crop ALL patches once
-        patches = [
-            img.crop((x, y, x+self.chunk_size, y+self.chunk_size))
-            for x, y in coords
-        ]
+                point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
 
-        # ✅ STEP 2: preprocess ONCE
-        t_pre = time.time()
-        inputs_all = self.processor.process_images(patches)
-        print(f"Preprocess: {time.time()-t_pre:.2f}s")
-
-        all_points = []
-
-        # ✅ STEP 3: batched GPU inference
-        for i in range(0, len(coords), self.BATCH_SIZE):
-
-            batch_inputs = {
-                k: v[i:i+self.BATCH_SIZE].to(self.device)
-                for k, v in inputs_all.items()
-            }
-
-            with torch.no_grad():
-                outputs = self.model(**batch_inputs)
-                embeds = outputs.image_embeds.detach().cpu()
-
-            # ✅ STEP 4: convert to points
-            for j in range(embeds.shape[0]):
-                x, y = coords[i + j]
-
-                all_points.append(
+                points.append(
                     PointStruct(
-                        id=abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15),
-                        vector={"image": embeds[j].tolist()},
+                        id=point_id,
+                        vector={"image": multi_vector.tolist()},
                         payload={
                             "page_number": page_num,
-                            "source": source,
+                            "source": str(source),
                             "x": x,
                             "y": y,
                             "chunk_size": self.chunk_size,
-                            "num_tokens": int(embeds[j].shape[0])
+                            "num_tokens": int(multi_vector.shape[0])
                         }
                     )
                 )
 
-            del batch_inputs, outputs, embeds
-
-        # ✅ STEP 5: batched upsert
-        for i in range(0, len(all_points), self.UPSERT_BATCH):
-            self.client.upsert(
+        if points:
+            self.local_client.upsert(
                 collection_name=self.collection_name,
-                points=all_points[i:i+self.UPSERT_BATCH],
-                wait=False
+                points=points,
+                wait=True
             )
 
-        if hasattr(img, "close"):
-            img.close()
-
-        page_time = time.time() - t0
-        print(f"Page {page_num} | {len(coords)} patches | {page_time:.2f}s")
-
+        page_time = time.time() - start_page
+        print(f"Page {page_num} completed: {page_time:.2f}s ")
+        aggressive_cleanup()
         return page_time
 
-    # -------------------------
+    def index_document(self, pdf_path: str):
+        start_doc = time.time()
+        images = pdf_to_images(pdf_path)
+        print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
 
-    def index_document(self, pdf_path):
+        total_time = 0.0
+        for i, img in enumerate(images):
+            page_time = self._process_and_upsert(img, pdf_path, i)
+            total_time += page_time
 
-        print(f"\nProcessing: {pdf_path}")
+        doc_time = time.time() - start_doc
+        print(f"Finished PDF: {pdf_path} | Total: {doc_time:.2f}s | Avg/page: {doc_time/len(images):.2f}s\n")
+        aggressive_cleanup()
+        return doc_time
 
-        doc = fitz.open(pdf_path)
-        total = 0
-
-        for i in range(len(doc)):
-            page = doc[i]
-
-            mat = fitz.Matrix(250/72, 250/72)
-            pix = page.get_pixmap(matrix=mat)
-
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-            total += self._process_page(img, pdf_path, i)
-
-        doc.close()
-
-        print(f"Total time: {total:.2f}s | Avg/page: {total/len(doc):.2f}s")
-
-    # -------------------------
-
-    def index_all_data(self, data_dir="data"):
-
+    def index_image(self, image_path: str):
         start = time.time()
+        img = Image.open(image_path).convert("RGB")
+        self._process_and_upsert(img, image_path, 0)
+        total_time = time.time() - start
+        aggressive_cleanup()
+        print(f"Indexed image: {image_path} | Time: {total_time:.2f}s\n")
 
-        for file in Path(data_dir).rglob("*"):
-            if file.suffix.lower() == ".pdf":
-                self.index_document(str(file))
-            elif file.suffix.lower() in [".jpg", ".png", ".jpeg"]:
-                img = Image.open(file).convert("RGB")
-                self._process_page(img, str(file), 0)
+    def index_all_data(self, data_dir: str = "data"):
+        start_total = time.time()
+        print("Starting full indexing...\n")
 
-        print(f"TOTAL TIME: {time.time()-start:.2f}s")
+        data_path = Path(data_dir)
+        for file_path in data_path.rglob("*"):
+            if file_path.suffix.lower() in [".pdf", ".jpg", ".jpeg", ".png"]:
+                if file_path.suffix.lower() == ".pdf":
+                    self.index_document(str(file_path))
+                else:
+                    self.index_image(str(file_path))
 
-    # -------------------------
-
+        total_index_time = time.time() - start_total
+        aggressive_cleanup()
+        print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
+    
     def close(self):
-        self.client.close()
+        if self.local_client:
+            self.local_client.close()

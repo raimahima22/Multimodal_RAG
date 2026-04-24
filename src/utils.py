@@ -6,7 +6,7 @@ from PIL import Image
 import gc
 from pdf2image import convert_from_path
 
-RAG_DPI = 300
+RAG_DPI = 100
 # Global page-level cache: (pdf_path, page_num) -> PIL Image
 _page_cache = {}
 
