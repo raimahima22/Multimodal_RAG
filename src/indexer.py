@@ -230,9 +230,9 @@ class MultimodalIndexer:
                     )
                 )
 
-                #  cleanup batch ----
-                del inputs, outputs, batch_embeddings, patches
-                aggressive_cleanup()
+            #  cleanup batch ----
+            del inputs, outputs, batch_embeddings, patches
+            aggressive_cleanup()
 
         # Upsert once per page ----
         if all_points:
