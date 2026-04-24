@@ -136,8 +136,15 @@ Answer:
         title="Multimodal RAG System",
         description="Ask questions with optional source filtering (sbc / spd)"
     )
+    try:
 
-    iface.launch(share=True)
+        iface.launch(share=True)
+    finally:
+        print("Shutting down Qdrant client...")
+        try:
+            indexer.local_client.close()
+        except Exception:
+            pass
 
 
 # ENTRY POINT
