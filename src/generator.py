@@ -115,7 +115,7 @@ class MultimodalGenerator:
         - Do NOT explain step-by-step unless asked
        
         OCR TEXT:
-        {extracted_text}
+        {combined_text}
         
         QUESTION:
         {query}
