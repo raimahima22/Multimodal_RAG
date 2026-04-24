@@ -163,12 +163,13 @@ class MultimodalIndexer:
         del inputs, outputs
         aggressive_cleanup()
         return embeddings
-
+    
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
-        w, h = pil_img.size
-        points = []
 
+        w, h = pil_img.size
+
+        #  Generate coordinates ----
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
         if y_coords and y_coords[-1] + self.chunk_size < h:
             y_coords.append(h - self.chunk_size)
@@ -180,14 +181,41 @@ class MultimodalIndexer:
         y_coords = sorted(set(y_coords))
         x_coords = sorted(set(x_coords))
 
-        for y in y_coords:
-            for x in x_coords:
+        coords = [(x, y) for y in y_coords for x in x_coords]
+
+        # Batch processing ----
+        BATCH_SIZE = 32   # 🔥 tune this (16–64 depending on GPU)
+
+        all_points = []
+
+        for i in range(0, len(coords), BATCH_SIZE):
+            batch_coords = coords[i:i + BATCH_SIZE]
+
+            patches = []
+            for x, y in batch_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
-                multi_vector = self._extract_image_embeddings(patch)
+                patches.append(patch)
+
+            # Model inference (BATCHED) ----
+            inputs = self.processor.process_images(patches).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+
+                if hasattr(outputs, "image_embeds"):
+                    batch_embeddings = outputs.image_embeds
+                else:
+                    batch_embeddings = outputs
+
+                batch_embeddings = to_numpy(batch_embeddings)
+
+            # Convert each patch ----
+            for j, (x, y) in enumerate(batch_coords):
+                multi_vector = batch_embeddings[j]
 
                 point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
 
-                points.append(
+                all_points.append(
                     PointStruct(
                         id=point_id,
                         vector={"image": multi_vector.tolist()},
@@ -202,17 +230,78 @@ class MultimodalIndexer:
                     )
                 )
 
-        if points:
+                #  cleanup batch ----
+                del inputs, outputs, batch_embeddings, patches
+                aggressive_cleanup()
+
+        # Upsert once per page ----
+        if all_points:
             self.local_client.upsert(
                 collection_name=self.collection_name,
-                points=points,
+                points=all_points,
                 wait=True
             )
 
+         # free image
+        if hasattr(pil_img, "close"):
+            pil_img.close()
+        del pil_img
+
         page_time = time.time() - start_page
-        print(f"Page {page_num} completed: {page_time:.2f}s ")
+        print(f"Page {page_num} done | {len(coords)} patches | {page_time:.2f}s")
+
         aggressive_cleanup()
         return page_time
+
+    # def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
+    #     start_page = time.time()
+    #     w, h = pil_img.size
+    #     points = []
+
+    #     y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
+    #     if y_coords and y_coords[-1] + self.chunk_size < h:
+    #         y_coords.append(h - self.chunk_size)
+
+    #     x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
+    #     if x_coords and x_coords[-1] + self.chunk_size < w:
+    #         x_coords.append(w - self.chunk_size)
+
+    #     y_coords = sorted(set(y_coords))
+    #     x_coords = sorted(set(x_coords))
+
+    #     for y in y_coords:
+    #         for x in x_coords:
+    #             patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
+    #             multi_vector = self._extract_image_embeddings(patch)
+
+    #             point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
+
+    #             points.append(
+    #                 PointStruct(
+    #                     id=point_id,
+    #                     vector={"image": multi_vector.tolist()},
+    #                     payload={
+    #                         "page_number": page_num,
+    #                         "source": str(source),
+    #                         "x": x,
+    #                         "y": y,
+    #                         "chunk_size": self.chunk_size,
+    #                         "num_tokens": int(multi_vector.shape[0])
+    #                     }
+    #                 )
+    #             )
+
+    #     if points:
+    #         self.local_client.upsert(
+    #             collection_name=self.collection_name,
+    #             points=points,
+    #             wait=True
+    #         )
+
+    #     page_time = time.time() - start_page
+    #     print(f"Page {page_num} completed: {page_time:.2f}s ")
+    #     aggressive_cleanup()
+    #     return page_time
 
     def index_document(self, pdf_path: str):
         start_doc = time.time()
