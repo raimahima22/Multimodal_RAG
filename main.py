@@ -97,7 +97,8 @@ def main(force_reindex: bool = False):
             if not hits:
                 return "No relevant documents found."
 
-            context_hits = hits
+            # context_hits = hits
+            context_hits = sorted(hits, key=lambda x: x.score, reverse=True)
             best_hit = context_hits[0]
 
             source = best_hit.payload.get('source', 'Unknown')
