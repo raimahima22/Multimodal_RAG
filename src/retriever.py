@@ -16,246 +16,247 @@ STOPWORDS = {
     "when", "where", "who", "which", "do", "does", "did", "was", "were",
     "be", "been", "being", "has", "have", "had", "by", "from", "about",
 }
- 
+
 
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
 def to_numpy(x):
-    """Converts anything to NumPy float32 array"""
     if isinstance(x, torch.Tensor):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
- 
-def tokenize(text: str) -> list[str]:
-    """Lowercase, split on non-alphanumeric, remove stopwords."""
+
+def tokenize(text: str):
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
- 
- 
-def extract_numbers(text: str) -> set[str]:
-    """Pull raw numeric strings from text (integers, decimals, percentages)."""
+
+
+def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
 
-class BM25:
-    """
-    Fit on a small corpus of OCR'd page texts, then score 
-    each document against a query.
-    """
 
-    def __init__(self, k1 = 1.5, b:float = 0.75):
-        self.k1 = k1 #term saturation
-        self.b = b #length normalization
+# ---------------- BM25 ----------------
+class BM25:
+    def __init__(self, k1=1.5, b=0.75):
+        self.k1 = k1
+        self.b = b
         self.corpus_size = 0
         self.avgdl = 0.0
-        self.doc_freqs: list[dict] = [] #count term frequency per document
-        self.idf: dict[str, float] = {} #idf per term
-        self.doc_lens: list[int] = [] #number of tokens per document
-    
-    def fit(self, corpus:list[str]):
-        """corpus: list of raw page texts."""
-        tokenized = [tokenize (doc) for doc in corpus] #tokenize corpus
-        self.corpus_size = len(tokenized) #corpus size calculate
-        self.doc_lens = [len(d) for d in tokenized] #document lengths
-        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size) 
         self.doc_freqs = []
-        #compute term frequencies + document frequencies
-        df:dict[str, int] = defaultdict(int)
+        self.idf = {}
+        self.doc_lens = []
+
+    def fit(self, corpus):
+        tokenized = [tokenize(doc) for doc in corpus]
+
+        self.corpus_size = len(tokenized)
+        self.doc_lens = [len(d) for d in tokenized]
+        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
+
+        df = defaultdict(int)
+        self.doc_freqs = []
+
         for doc in tokenized:
-            freq: dict[str, int] = defaultdict(int)
-            for tok in doc:
-                freq[tok] += 1
+            freq = defaultdict(int)
+            for t in doc:
+                freq[t] += 1
             self.doc_freqs.append(dict(freq))
-            for tok in set(doc):
-                df[tok] += 1
-        #compute IDF
+            for t in set(doc):
+                df[t] += 1
+
         for term, n in df.items():
             self.idf[term] = math.log(
                 (self.corpus_size - n + 0.5) / (n + 0.5) + 1
             )
-    def score(self, query_tokens: list[str], doc_idx: int) -> float:
+
+    def score(self, query_tokens, i):
         score = 0.0
-        dl = self.doc_lens[doc_idx]
-        freq_map = self.doc_freqs[doc_idx]
-        #iterate query tokens
-        for tok in query_tokens:
-            if tok not in freq_map:
+        dl = self.doc_lens[i]
+        freq = self.doc_freqs[i]
+
+        for t in query_tokens:
+            if t not in freq:
                 continue
-            f = freq_map[tok]
-            idf = self.idf.get(tok, 0.0)
-            num = f * (self.k1 + 1) #boosts repeated terms
-            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl)) #penalizes long documents
+            f = freq[t]
+            idf = self.idf.get(t, 0.0)
+
+            num = f * (self.k1 + 1)
+            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
             score += idf * num / den
+
         return score
 
+
+# ---------------- RETRIEVER ----------------
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
+        self._ocr_cache = {}
 
-
-    def _extract_text_embedding(self, query_text: str):
-        """Extract multi-vector text embedding for ColQwen2.5"""
-        start = time.time()
-   
+    # ---------------- EMBEDDING ----------------
+    def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
-   
+
         with torch.no_grad():
             outputs = self.indexer.model(**inputs)
-       
-            # ColQwen2.5 specific
-            if hasattr(outputs, "query_embeds") and outputs.query_embeds is not None:
-                embedding = to_numpy(outputs.query_embeds[0])
-            elif hasattr(outputs, "query_embeddings") and outputs.query_embeddings is not None:
-                embedding = to_numpy(outputs.query_embeddings[0])
-            elif isinstance(outputs, torch.Tensor):
-                embedding = to_numpy(outputs[0])
+
+            if hasattr(outputs, "query_embeds"):
+                emb = outputs.query_embeds[0]
+            elif hasattr(outputs, "query_embeddings"):
+                emb = outputs.query_embeddings[0]
             else:
-                embedding = to_numpy(outputs)  # last resort
-       
-        # L2 normalize each token vector (ColQwen2.5 expects this)
-            norms = np.linalg.norm(embedding, axis=1, keepdims=True)
-            norms[norms == 0] = 1.0
-            embedding = embedding / norms
-   
-        embed_time = time.time() - start
-        print(f"Query embedded in {embed_time:.3f}s | Tokens: {embedding.shape[0]}")
-   
-        del inputs, outputs
-        aggressive_cleanup()
-        return embedding, embed_time
-    
-    def _ocr_page(self, point, generator) -> str:
-        """OCR a page from a point's payload using generator's EasyOCR reader."""
-        source = point.payload.get("source", "")
-        page_num = point.payload.get("page_number", 0)
+                emb = outputs[0] if isinstance(outputs, torch.Tensor) else outputs
+
+        emb = to_numpy(emb)
+
+        norms = np.linalg.norm(emb, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        emb = emb / norms
+
+        return emb
+
+    # ---------------- OCR ----------------
+    def _ocr_page(self, point, generator):
+        key = (point.payload.get("source"), point.payload.get("page_number"))
+
+        if key in self._ocr_cache:
+            return self._ocr_cache[key]
+
+        source, page_num = key
+
         try:
             if source.lower().endswith(".pdf"):
                 pages = pdf_to_images(source)
                 img = pages[page_num]
             else:
                 img = Image.open(source)
+
             text = generator._extract_text(img)
-            print(f"  OCR: Page {page_num} → {len(text)} chars extracted")
+            self._ocr_cache[key] = text
             return text
-        except Exception as e:
-            print(f"  OCR failed for page {page_num}: {e}")
+
+        except:
             return ""
 
+    # ---------------- SEARCH ----------------
+    def search(self, query_text, top_k=10, source_filter=None, generator=None):
 
-    def search(self, query_text: str, top_k: int = 10, source_filter: str = None, generator=None):
-        start_search = time.time()
-       
-        # 1. Get ColQwen2.5 embedding
-        query_emb_array, embed_time = self._extract_text_embedding(query_text)
-        query_multi_vec = query_emb_array.tolist()
+        emb = self._extract_text_embedding(query_text)
+        query_vec = emb.tolist()
 
-        # 2. Optional filter
-        query_filter = Filter(must=[FieldCondition(key="source", match=MatchText(text=source_filter.lower()))]) if source_filter else None
+        query_filter = None
+        if source_filter:
+            query_filter = Filter(
+                must=[FieldCondition(
+                    key="source",
+                    match=MatchText(text=source_filter.lower())
+                )]
+            )
 
-        # 3. Retrieve more candidates from Qdrant (we'll rerank them)
+        # 🔥 OVERFETCH (IMPORTANT)
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
-            query=query_multi_vec,
+            query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=10,                    # Increased a bit for better reranking pool
-            score_threshold=None,
+            limit=80,   # increased recall
         ).points
 
-        # Normalize embedding score
-        num_query_tokens = query_emb_array.shape[0]
-        for point in results:
-            if point.score is not None:
-                point.score = point.score / num_query_tokens
+        # normalize embedding score
+        for p in results:
+            if p.score is not None:
+                p.score /= emb.shape[0]
 
-        print(f"Qdrant retrieval done in {time.time() - start_search:.2f}s | Candidates: {len(results)}")
+        # ---------------- DEDUP BY PAGE ----------------
+        page_best = {}
+        for p in results:
+            key = (p.payload.get("source"), p.payload.get("page_number"))
 
-        # 4. Hybrid Reranking (BM25 + Keywords + Numbers + Embedding)
+            if key not in page_best or p.score > page_best[key].score:
+                page_best[key] = p
+
+        results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)[:10]
+
+        print(f"Qdrant retrieval done | Candidates: {len(results)}")
+
         if generator:
-            final_hits = self._hybrid_rerank(query_text, results, generator, top_k=top_k)
+            return self._rerank(query_text, results, generator, top_k)
         else:
-            final_hits = sorted(results, key=lambda x: x.score, reverse=True)[:top_k]
+            return results[:top_k]
 
-        total_time = time.time() - start_search
-        print(f"Total search + rerank time: {total_time:.2f}s\n")
+    # ---------------- RERANK ----------------
+    def _rerank(self, query, hits, generator, top_k):
 
-        return final_hits
-
-
-    def _hybrid_rerank(self, query: str, hits, generator, top_k: int = 5):
-        """Single-pass hybrid reranker (Embedding + BM25 + Keyword + Numeric)"""
-        if not hits:
-            return []
-
-        # --- OCR once and cache ---
         ocr_texts = []
-        for point in hits:
-            text = self._ocr_page(point, generator)   # Still necessary unless you pre-compute
-            ocr_texts.append(text)
+        for p in hits:
+            ocr_texts.append(self._ocr_page(p, generator))
 
-        # --- BM25 ---
         bm25 = BM25()
         bm25.fit(ocr_texts)
-        query_tokens = tokenize(query)
 
-        bm25_scores = [bm25.score(query_tokens, i) for i in range(len(hits))]
+        q_tokens = tokenize(query)
 
-        # --- Keyword, Phrase & Number signals ---
+        bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
+
         query_lower = query.lower()
         content_words = set(query_lower.split()) - STOPWORDS
         query_numbers = extract_numbers(query_lower)
-        query_tokens_raw = query_lower.split()
 
         keyword_scores = []
         phrase_scores = []
         number_scores = []
 
         for text in ocr_texts:
-            text_lower = text.lower()
-            page_words = text_lower.split()
+            t = text.lower()
 
-            # Keyword match
-            exact = sum(1 for w in content_words if w in text_lower)
-            partial = sum(1 for w in content_words if any(w in tok for tok in page_words))
-            keyword_scores.append(exact * 2.0 + partial * 0.5)
+            exact = sum(1 for w in content_words if w in t)
+            partial = sum(1 for w in content_words if any(w in x for x in t.split()))
+            keyword_scores.append(exact * 2 + partial * 0.5)
 
-            # Phrase match
-            phrase_bonus = 0.0
+            phrase_bonus = 0
+            q = query_lower.split()
             for n in (2, 3):
-                for i in range(len(query_tokens_raw) - n + 1):
-                    phrase = " ".join(query_tokens_raw[i:i+n])
-                    if phrase in text_lower:
-                        phrase_bonus += n * 2.0
+                for i in range(len(q) - n + 1):
+                    ph = " ".join(q[i:i+n])
+                    if ph in t:
+                        phrase_bonus += n * 2
             phrase_scores.append(phrase_bonus)
 
-            # Numeric match
-            page_numbers = extract_numbers(text_lower)
-            number_scores.append(len(query_numbers & page_numbers) * 3.0)
+            nums = extract_numbers(t)
+            number_scores.append(len(nums & query_numbers) * 3)
 
-        # --- Combine scores using weighted sum (faster than RRF) ---
         emb_scores = [p.score for p in hits]
 
-        final_scores = []
-        for i in range(len(hits)):
+        def norm(x):
+            m = max(x) if x else 1
+            return [i / (m + 1e-8) for i in x]
+
+        emb_scores = norm(emb_scores)
+        bm25_scores = norm(bm25_scores)
+        keyword_scores = norm(keyword_scores)
+        phrase_scores = norm(phrase_scores)
+        number_scores = norm(number_scores)
+
+        final = []
+
+        for i, p in enumerate(hits):
             score = (
-                0.35 * (emb_scores[i] / max(emb_scores)) +           # normalize embedding
-                0.30 * (bm25_scores[i] / (max(bm25_scores) + 1e-8)) +
-                0.20 * (keyword_scores[i] / (max(keyword_scores) + 1e-8)) +
-                0.10 * (phrase_scores[i] / (max(phrase_scores) + 1e-8)) +
-                0.05 * (number_scores[i] / (max(number_scores) + 1e-8))
+                0.40 * emb_scores[i] +
+                0.25 * bm25_scores[i] +
+                0.20 * keyword_scores[i] +
+                0.10 * phrase_scores[i] +
+                0.05 * number_scores[i]
             )
-            final_scores.append(score)
 
-            # Debug print
-            pg = hits[i].payload.get("page_number", "?")
-            print(f"Page {pg} | emb={emb_scores[i]:.4f} | bm25={bm25_scores[i]:.3f} | "
-                  f"kw={keyword_scores[i]:.2f} | final={score:.5f}")
+            final.append((score, p))
 
-        # Sort and return top_k
-        scored_hits = sorted(zip(final_scores, hits), key=lambda x: x[0], reverse=True)
-        final_hits = [point for _, point in scored_hits[:top_k]]
+            pg = p.payload.get("page_number", "?")
+            print(f"Page {pg} | final={score:.5f}")
 
-        print(f"Hybrid reranking completed → {len(final_hits)} final pages")
-        return final_hits
+        final.sort(key=lambda x: x[0], reverse=True)
+
+        return [p for _, p in final[:top_k]]
