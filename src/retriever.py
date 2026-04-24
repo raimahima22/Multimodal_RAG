@@ -322,11 +322,11 @@ class MultimodalRetriever:
  
         # Signal weights — tune based on your document types.
         # For dense-text docs raise w_bm25; for tables/figures raise w_num.
-        w_emb    = 0.30
-        w_bm25   = 0.25
-        w_kw     = 0.20
-        w_phrase = 0.15
-        w_num    = 0.10
+        w_emb    = 0.60
+        w_bm25   = 0.15
+        w_kw     = 0.10
+        w_phrase = 0.10
+        w_num    = 0.05
  
         scored = []
         for i, point in enumerate(valid_hits):
