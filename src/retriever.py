@@ -52,7 +52,7 @@ class BM25:
         self.doc_freqs: list[dict] = [] #count per document
         self.idf: dict[str, float] = {}
         self.doc_lens: list[int] = []
-        self.use_reranker = False
+     
 
     def fit(self, corpus:list[str]):
         """corpus: list of raw page texts."""
@@ -92,6 +92,7 @@ class BM25:
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
+        self.use_reranker = False
 
 
     def _extract_text_embedding(self, query_text: str):
