@@ -160,7 +160,7 @@ class MultimodalRetriever:
             query=query_multi_vec,
             using="image",
             query_filter=query_filter,
-            limit=20,                    # Increased a bit for better reranking pool
+            limit=10,                    # Increased a bit for better reranking pool
             score_threshold=None,
         ).points
 
