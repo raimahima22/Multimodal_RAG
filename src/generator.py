@@ -11,6 +11,67 @@ import gc
 import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
+from groq import RateLimitError
+import re
+
+def create_llm(api_key):
+    return ChatGroq(
+        model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+        groq_api_key=api_key,
+        temperature=0.2,
+        max_tokens=1024,
+    )
+
+def extract_wait_time(error_msg):
+    match = re.search(r"try again in (\d+)m([\d\.]+)s", error_msg)
+    if match:
+        minutes = int(match.group(1))
+        seconds = float(match.group(2))
+        return minutes * 60 + seconds
+    return 60  # fallback
+
+
+class GroqLLMWrapper:
+    def __init__(self, keys):
+        self.keys = [k for k in keys if k]  # remove None keys
+        if not self.keys:
+            raise ValueError("No GROQ API keys provided")
+
+        self.current_key_index = 0
+        self.llm = create_llm(self.keys[self.current_key_index])
+
+    def switch_key(self):
+        self.current_key_index += 1
+
+        if self.current_key_index >= len(self.keys):
+            return False  # no keys left
+
+        print(f" Switching to GROQ_API_KEY{self.current_key_index + 1}")
+        self.llm = create_llm(self.keys[self.current_key_index])
+        return True
+
+    def invoke(self, messages, retries=3):
+        attempt = 0
+
+        while attempt <= retries:
+            try:
+                return self.llm.invoke(messages)
+
+            except RateLimitError as e:
+                print(" Rate limit hit")
+
+                # Try switching key first
+                if self.switch_key():
+                    continue
+
+                # No keys left → wait
+                wait_time = extract_wait_time(str(e))
+                print(f" Waiting {wait_time:.2f}s before retry...")
+                time.sleep(wait_time)
+
+                attempt += 1
+
+        raise Exception(" Failed after retries due to rate limits.")
 
 load_dotenv('/content/drive/MyDrive/.env')
 def aggressive_cleanup():
@@ -18,16 +79,20 @@ def aggressive_cleanup():
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-
+GROQ_KEYS = [
+    os.environ.get("GROQ_API_KEY"),
+    os.environ.get("GROQ_API_KEY2"),
+]
 
 class MultimodalGenerator:
     def __init__(self):
-        self.llm = ChatGroq(
-            model_name="meta-llama/llama-4-scout-17b-16e-instruct",
-            groq_api_key=os.environ.get("GROQ_API_KEY"),
-            temperature=0.2,      # Lower for more factual answers
-            max_tokens=1024,
-        )
+        # self.llm = ChatGroq(
+        #     model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+        #     groq_api_key=os.environ.get("GROQ_API_KEY"),
+        #     temperature=0.2,      # Lower for more factual answers
+        #     max_tokens=1024,
+        # )
+        self.llm = GroqLLMWrapper(GROQ_KEYS)
         # self.llm = ChatOpenAI(
         #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
         #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),

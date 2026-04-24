@@ -17,7 +17,7 @@ class SPDEvaluator:
         self.retriever = MultimodalRetriever(self.indexer)
         self.generator = MultimodalGenerator()
 
-        # 🔥 semantic model (fast + good)
+        #  semantic model (fast + good)
         self.sim_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     # -----------------------------
@@ -26,18 +26,18 @@ class SPDEvaluator:
         gt = gt.lower().strip()
         pred = pred.lower().strip()
 
-        # ✅ exact match
+        #  exact match
         exact = int(gt == pred)
 
-        # ✅ fuzzy match
+        #  fuzzy match
         fuzzy = fuzz.token_set_ratio(gt, pred)
 
-        # ✅ semantic similarity
+        #  semantic similarity
         emb1 = self.sim_model.encode(gt, convert_to_tensor=True)
         emb2 = self.sim_model.encode(pred, convert_to_tensor=True)
         semantic = float(util.cos_sim(emb1, emb2))
 
-        # ✅ final decision rule (tunable)
+        #  final decision rule (tunable)
         answer_found = int(
             exact == 1 or
             fuzzy > 75 or
