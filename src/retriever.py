@@ -52,7 +52,8 @@ class BM25:
         self.doc_freqs: list[dict] = [] #count per document
         self.idf: dict[str, float] = {}
         self.doc_lens: list[int] = []
-    
+        self.use_reranker = False
+
     def fit(self, corpus:list[str]):
         """corpus: list of raw page texts."""
         tokenized = [tokenize (doc) for doc in corpus]
@@ -207,7 +208,7 @@ class MultimodalRetriever:
             score = p.score
             print(f"  {i}. {src} (Page {pg}) — score={score:.4f}")      
         # 5. Rerank (MANDATORY)
-        if generator:
+        if generator and self.use_reranker:
             final_hits = self.rerank_hits(query_text, initial_hits,generator, top_k=3)
         else:
             final_hits = initial_hits[:3]
