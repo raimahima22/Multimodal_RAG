@@ -142,7 +142,6 @@ class MultimodalRetriever:
         except:
             return ""
 
-    # ---------------- SEARCH ----------------
     def search(self, query_text, top_k=10, source_filter=None, generator=None):
 
         emb = self._extract_text_embedding(query_text)
@@ -157,13 +156,13 @@ class MultimodalRetriever:
                 )]
             )
 
-        # 🔥 OVERFETCH (IMPORTANT)
+        
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=80,   # increased recall
+            limit=80,   
         ).points
 
         # normalize embedding score
@@ -171,7 +170,7 @@ class MultimodalRetriever:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # ---------------- DEDUP BY PAGE ----------------
+        # dedup by page
         page_best = {}
         for p in results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
@@ -182,13 +181,21 @@ class MultimodalRetriever:
         results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)[:10]
 
         print(f"Qdrant retrieval done | Candidates: {len(results)}")
+        print("\n==================Initial Ranking===============\n")
+        for i, p in enumerate(results[:15], 1):
+            print(
+                f"{i}. Page {p.payload.get('page_number','?')} | "
+                f"score={p.score:.5f}"
+            )
+
+        top_hits = results[:10]
 
         if generator:
             return self._rerank(query_text, results, generator, top_k)
         else:
             return results[:top_k]
 
-    # ---------------- RERANK ----------------
+    
     def _rerank(self, query, hits, generator, top_k):
 
         ocr_texts = []
@@ -243,6 +250,8 @@ class MultimodalRetriever:
 
         final = []
 
+        print("\n=============Rerank Scores==========")
+
         for i, p in enumerate(hits):
             score = (
                 0.40 * emb_scores[i] +
@@ -254,9 +263,20 @@ class MultimodalRetriever:
 
             final.append((score, p))
 
-            pg = p.payload.get("page_number", "?")
-            print(f"Page {pg} | final={score:.5f}")
+            print(
+                f"Page {p.payload.get('page_number','?')} | "
+                f"emb={emb_scores_n[i]:.3f} | "
+                f"bm25={bm25_n[i]:.3f} | "
+                f"kw={kw_n[i]:.3f} | "
+                f"phrase={ph_n[i]:.3f} | "
+                f"num={num_n[i]:.3f} | "
+                f"FINAL={score:.5f}"
+            )
 
         final.sort(key=lambda x: x[0], reverse=True)
+
+        print("\n================ FINAL TOP PAGES ================\n")
+        for i, (score, p) in enumerate(final[:top_k], 1):
+            print(f"{i}. Page {p.payload.get('page_number','?')} | FINAL={score:.5f}")
 
         return [p for _, p in final[:top_k]]
