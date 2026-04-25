@@ -12,7 +12,7 @@ import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
 from groq import RateLimitError
-import re
+import time
 
 def create_llm(api_key):
     return ChatGroq(
@@ -22,18 +22,10 @@ def create_llm(api_key):
         max_tokens=1024,
     )
 
-def extract_wait_time(error_msg):
-    match = re.search(r"try again in (\d+)m([\d\.]+)s", error_msg)
-    if match:
-        minutes = int(match.group(1))
-        seconds = float(match.group(2))
-        return minutes * 60 + seconds
-    return 60  # fallback
-
 
 class GroqLLMWrapper:
     def __init__(self, keys):
-        self.keys = [k for k in keys if k]  # remove None keys
+        self.keys = [k for k in keys if k]
         if not self.keys:
             raise ValueError("No GROQ API keys provided")
 
@@ -44,28 +36,39 @@ class GroqLLMWrapper:
         self.current_key_index += 1
 
         if self.current_key_index >= len(self.keys):
-            return False  # no keys left
+            return False
 
-        print(f" Switching to GROQ_API_KEY{self.current_key_index + 1}")
+        print(f"Switching to GROQ_API_KEY{self.current_key_index + 1}")
         self.llm = create_llm(self.keys[self.current_key_index])
         return True
 
     def invoke(self, messages):
-        try:
-            return self.llm.invoke(messages)
+        last_error = None
 
-        except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                print(" Rate limit hit → trying next key")
+        while self.current_key_index < len(self.keys):
+            try:
+                return self.llm.invoke(messages)
 
-                if self.switch_key():
-                    return self.llm.invoke(messages)
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
 
-                print(" All API keys exhausted → skipping request")
-                raise RuntimeError("RATE_LIMIT_EXHAUSTED")
+                print(f" Error with key {self.current_key_index + 1}: {e}")
 
-            raise e
-            
+                # Detect retry-worthy failures
+                if any(x in err_str for x in [
+                    "rate_limit", "429", "quota", 
+                    "timeout", "connection", "temporarily unavailable"
+                ]):
+                    print(" Trying next API key...")
+                    if not self.switch_key():
+                        break
+                else:
+                    # Unknown error → don't silently skip
+                    raise e
+
+        print(" All API keys exhausted")
+        raise RuntimeError(f"ALL_KEYS_FAILED: {last_error}")
 load_dotenv('/content/drive/MyDrive/.env')
 def aggressive_cleanup():
     
@@ -75,6 +78,7 @@ def aggressive_cleanup():
 GROQ_KEYS = [
     os.environ.get("GROQ_API_KEY"),
     os.environ.get("GROQ_API_KEY2"),
+    os.environ.get("GROQ_API_KEY3"),
 ]
 
 class MultimodalGenerator:
