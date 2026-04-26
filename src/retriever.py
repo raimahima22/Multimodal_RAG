@@ -4,18 +4,19 @@ import gc
 import re
 import math
 from collections import defaultdict
-from functools import lru_cache
 
 from src.utils import pdf_to_images
 from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
+# ---------------- STOPWORDS ----------------
 STOPWORDS = {
     "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
     "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
     "when", "where", "who", "which", "do", "does", "did", "was", "were",
     "be", "been", "being", "has", "have", "had", "by", "from", "about",
+    "under"
 }
 
 
@@ -36,6 +37,10 @@ def to_numpy(x):
 def tokenize(text: str):
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
+
+
+def normalize_query(text: str):
+    return " ".join(tokenize(text))
 
 
 def extract_numbers(text: str):
@@ -93,6 +98,7 @@ class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
         self._ocr_cache = {}
+        self._cache_limit = 100
 
     # ---------------- EMBEDDING ----------------
     def _extract_text_embedding(self, query_text):
@@ -109,13 +115,11 @@ class MultimodalRetriever:
                 emb = outputs[0] if isinstance(outputs, torch.Tensor) else outputs
 
         emb = to_numpy(emb)
-
-        # safe normalization (no extra copies)
         emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
 
         return emb
 
-    # ---------------- OCR (SAFE) ----------------
+    # ---------------- OCR ----------------
     def _ocr_page(self, point, generator):
         key = (point.payload.get("source"), point.payload.get("page_number"))
 
@@ -126,7 +130,6 @@ class MultimodalRetriever:
 
         try:
             if source.lower().endswith(".pdf"):
-                # 🔥 ONLY LOAD ONE PAGE
                 pages = pdf_to_images(
                     source,
                     first_page=page_num + 1,
@@ -139,8 +142,7 @@ class MultimodalRetriever:
 
             text = generator._extract_text(img)
 
-            # limit cache size
-            if len(self._ocr_cache) > 100:
+            if len(self._ocr_cache) > self._cache_limit:
                 self._ocr_cache.clear()
                 aggressive_cleanup()
 
@@ -155,7 +157,10 @@ class MultimodalRetriever:
     # ---------------- SEARCH ----------------
     def search(self, query_text, top_k=10, source_filter=None, generator=None):
 
-        emb = self._extract_text_embedding(query_text)
+        # ✅ FIX: normalize query (removes "is", etc.)
+        clean_query = normalize_query(query_text)
+
+        emb = self._extract_text_embedding(clean_query)
         query_vec = emb.tolist()
 
         query_filter = None
@@ -167,16 +172,14 @@ class MultimodalRetriever:
                 )]
             )
 
-        # 🔥 REDUCED LIMIT
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=50,
+            limit=60,   # slightly increased for recall
         ).points
 
-        # normalize score
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
@@ -192,11 +195,11 @@ class MultimodalRetriever:
 
         print(f"Qdrant retrieval done | Candidates: {len(results)}")
 
-        # 🔥 LIMIT BEFORE OCR
-        hits = results[:8]
+        # ✅ FIX: larger rerank pool (critical)
+        hits = results[:15]
 
         if generator:
-            return self._rerank(query_text, hits, generator, top_k)
+            return self._rerank(clean_query, hits, generator, top_k)
         else:
             return hits[:top_k]
 
@@ -211,24 +214,24 @@ class MultimodalRetriever:
         q_tokens = tokenize(query)
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
 
-        query_lower = query.lower()
-        content_words = set(query_lower.split()) - STOPWORDS
-        query_numbers = extract_numbers(query_lower)
+        content_words = set(q_tokens)
+        query_numbers = extract_numbers(query)
 
         keyword_scores, phrase_scores, number_scores = [], [], []
 
         for text in ocr_texts:
             t = text.lower()
 
+            # ✅ improved keyword scoring
             exact = sum(1 for w in content_words if w in t)
             partial = sum(1 for w in content_words if any(w in x for x in t.split()))
-            keyword_scores.append(exact * 2 + partial * 0.5)
+            keyword_scores.append(exact * 3 + partial * 0.5)
 
+            # ✅ FIXED phrase scoring (no stopwords)
             phrase_bonus = 0
-            q = query_lower.split()
             for n in (2, 3):
-                for i in range(len(q) - n + 1):
-                    if " ".join(q[i:i+n]) in t:
+                for i in range(len(q_tokens) - n + 1):
+                    if " ".join(q_tokens[i:i+n]) in t:
                         phrase_bonus += n * 2
             phrase_scores.append(phrase_bonus)
 
@@ -261,7 +264,7 @@ class MultimodalRetriever:
 
         final.sort(key=lambda x: x[0], reverse=True)
 
-        # cleanup big objects
+        # cleanup
         del ocr_texts
         aggressive_cleanup()
 
