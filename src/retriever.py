@@ -2,9 +2,10 @@ import torch
 import numpy as np
 import gc
 import re
-import time
 import math
 from collections import defaultdict
+from functools import lru_cache
+
 from src.utils import pdf_to_images
 from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
@@ -18,6 +19,7 @@ STOPWORDS = {
 }
 
 
+# ---------------- MEMORY ----------------
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
@@ -30,6 +32,7 @@ def to_numpy(x):
     return np.asarray(x, dtype=np.float32)
 
 
+# ---------------- TEXT UTILS ----------------
 def tokenize(text: str):
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
@@ -44,43 +47,37 @@ class BM25:
     def __init__(self, k1=1.5, b=0.75):
         self.k1 = k1
         self.b = b
-        self.corpus_size = 0
-        self.avgdl = 0.0
-        self.doc_freqs = []
-        self.idf = {}
-        self.doc_lens = []
 
     def fit(self, corpus):
-        tokenized = [tokenize(doc) for doc in corpus]
-
-        self.corpus_size = len(tokenized)
-        self.doc_lens = [len(d) for d in tokenized]
-        self.avgdl = sum(self.doc_lens) / max(1, self.corpus_size)
+        self.tokenized = [tokenize(doc) for doc in corpus]
+        self.doc_lens = [len(d) for d in self.tokenized]
+        self.avgdl = sum(self.doc_lens) / max(1, len(self.tokenized))
 
         df = defaultdict(int)
-        self.doc_freqs = []
+        self.freqs = []
 
-        for doc in tokenized:
+        for doc in self.tokenized:
             freq = defaultdict(int)
             for t in doc:
                 freq[t] += 1
-            self.doc_freqs.append(dict(freq))
+            self.freqs.append(freq)
             for t in set(doc):
                 df[t] += 1
 
-        for term, n in df.items():
-            self.idf[term] = math.log(
-                (self.corpus_size - n + 0.5) / (n + 0.5) + 1
-            )
+        self.idf = {
+            t: math.log((len(self.tokenized) - n + 0.5) / (n + 0.5) + 1)
+            for t, n in df.items()
+        }
 
     def score(self, query_tokens, i):
         score = 0.0
+        freq = self.freqs[i]
         dl = self.doc_lens[i]
-        freq = self.doc_freqs[i]
 
         for t in query_tokens:
             if t not in freq:
                 continue
+
             f = freq[t]
             idf = self.idf.get(t, 0.0)
 
@@ -113,13 +110,12 @@ class MultimodalRetriever:
 
         emb = to_numpy(emb)
 
-        norms = np.linalg.norm(emb, axis=1, keepdims=True)
-        norms[norms == 0] = 1.0
-        emb = emb / norms
+        # safe normalization (no extra copies)
+        emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
 
         return emb
 
-    # ---------------- OCR ----------------
+    # ---------------- OCR (SAFE) ----------------
     def _ocr_page(self, point, generator):
         key = (point.payload.get("source"), point.payload.get("page_number"))
 
@@ -130,19 +126,34 @@ class MultimodalRetriever:
 
         try:
             if source.lower().endswith(".pdf"):
-                pages = pdf_to_images(source)
-                img = pages[page_num]
+                # 🔥 ONLY LOAD ONE PAGE
+                pages = pdf_to_images(
+                    source,
+                    first_page=page_num + 1,
+                    last_page=page_num + 1
+                )
+                img = pages[0]
+                del pages
             else:
                 img = Image.open(source)
 
             text = generator._extract_text(img)
+
+            # limit cache size
+            if len(self._ocr_cache) > 100:
+                self._ocr_cache.clear()
+                aggressive_cleanup()
+
             self._ocr_cache[key] = text
+
+            del img
             return text
 
-        except:
+        except Exception:
             return ""
 
-    def search(self, query_text, top_k=20, source_filter=None, generator=None):
+    # ---------------- SEARCH ----------------
+    def search(self, query_text, top_k=10, source_filter=None, generator=None):
 
         emb = self._extract_text_embedding(query_text)
         query_vec = emb.tolist()
@@ -156,66 +167,55 @@ class MultimodalRetriever:
                 )]
             )
 
-        
+        # 🔥 REDUCED LIMIT
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=200,   
+            limit=50,
         ).points
 
-        # normalize embedding score
+        # normalize score
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # dedup by page
+        # deduplicate per page
         page_best = {}
         for p in results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
-
             if key not in page_best or p.score > page_best[key].score:
                 page_best[key] = p
 
-        results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)[:10]
+        results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)
 
         print(f"Qdrant retrieval done | Candidates: {len(results)}")
-        print("\n==================Initial Ranking===============\n")
-        for i, p in enumerate(results[:15], 1):
-            print(
-                f"{i}. Page {p.payload.get('page_number','?')} | "
-                f"score={p.score:.5f}"
-            )
 
-        top_hits = results[:20]
+        # 🔥 LIMIT BEFORE OCR
+        hits = results[:8]
 
         if generator:
-            return self._rerank(query_text, results, generator, top_k)
+            return self._rerank(query_text, hits, generator, top_k)
         else:
-            return results[:top_k]
+            return hits[:top_k]
 
-    
+    # ---------------- RERANK ----------------
     def _rerank(self, query, hits, generator, top_k):
 
-        ocr_texts = []
-        for p in hits:
-            ocr_texts.append(self._ocr_page(p, generator))
+        ocr_texts = [self._ocr_page(p, generator) for p in hits]
 
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
         q_tokens = tokenize(query)
-
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
 
         query_lower = query.lower()
         content_words = set(query_lower.split()) - STOPWORDS
         query_numbers = extract_numbers(query_lower)
 
-        keyword_scores = []
-        phrase_scores = []
-        number_scores = []
+        keyword_scores, phrase_scores, number_scores = [], [], []
 
         for text in ocr_texts:
             t = text.lower()
@@ -228,8 +228,7 @@ class MultimodalRetriever:
             q = query_lower.split()
             for n in (2, 3):
                 for i in range(len(q) - n + 1):
-                    ph = " ".join(q[i:i+n])
-                    if ph in t:
+                    if " ".join(q[i:i+n]) in t:
                         phrase_bonus += n * 2
             phrase_scores.append(phrase_bonus)
 
@@ -250,8 +249,6 @@ class MultimodalRetriever:
 
         final = []
 
-        print("\n=============Rerank Scores==========")
-
         for i, p in enumerate(hits):
             score = (
                 0.50 * emb_scores[i] +
@@ -260,23 +257,12 @@ class MultimodalRetriever:
                 0.10 * phrase_scores[i] +
                 0.05 * number_scores[i]
             )
-
             final.append((score, p))
-
-            print(
-                f"Page {p.payload.get('page_number','?')} | "
-                f"emb={emb_scores[i]:.3f} | "
-                f"bm25={bm25_scores[i]:.3f} | "
-                f"kw={keyword_scores[i]:.3f} | "
-                f"phrase={phrase_scores[i]:.3f} | "
-                f"num={number_scores[i]:.3f} | "
-                f"FINAL={score:.5f}"
-            )
 
         final.sort(key=lambda x: x[0], reverse=True)
 
-        print("\n================ FINAL TOP PAGES ================\n")
-        for i, (score, p) in enumerate(final[:top_k], 1):
-            print(f"{i}. Page {p.payload.get('page_number','?')} | FINAL={score:.5f}")
+        # cleanup big objects
+        del ocr_texts
+        aggressive_cleanup()
 
         return [p for _, p in final[:top_k]]
