@@ -51,7 +51,7 @@ class SPDEvaluator:
     def evaluate(
         self,
         excel_path="/content/drive/MyDrive/Question_samples.xlsx",
-        output_dir="/content/drive/MyDrive/evaluation_results"
+        output_dir="/content/drive/MyDrive/evaluation_results2"
     ):
         print(f"Reading questions from: {excel_path}")
 
