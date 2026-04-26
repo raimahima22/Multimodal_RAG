@@ -10,6 +10,10 @@ from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
+# ---------------- CONFIG ----------------
+VERBOSE = True   # 🔥 turn OFF during bulk evaluation
+
+
 # ---------------- STOPWORDS ----------------
 STOPWORDS = {
     "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
@@ -157,7 +161,9 @@ class MultimodalRetriever:
     # ---------------- SEARCH ----------------
     def search(self, query_text, top_k=10, source_filter=None, generator=None):
 
-        # ✅ FIX: normalize query (removes "is", etc.)
+        if VERBOSE:
+            print("\n" + query_text + "\n")
+
         clean_query = normalize_query(query_text)
 
         emb = self._extract_text_embedding(clean_query)
@@ -177,14 +183,14 @@ class MultimodalRetriever:
             query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=60,   # slightly increased for recall
+            limit=60,
         ).points
 
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # deduplicate per page
+        # deduplicate pages
         page_best = {}
         for p in results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
@@ -193,9 +199,15 @@ class MultimodalRetriever:
 
         results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)
 
-        print(f"Qdrant retrieval done | Candidates: {len(results)}")
+        if VERBOSE:
+            print(f"Qdrant retrieval done | Candidates: {len(results)}\n")
+            print("==================Initial Ranking===============\n")
 
-        # ✅ FIX: larger rerank pool (critical)
+            for i, p in enumerate(results[:top_k], 1):
+                page = p.payload.get("page_number")
+                score = p.score if p.score is not None else 0
+                print(f"{i}. Page {page} | score={score:.5f}")
+
         hits = results[:15]
 
         if generator:
@@ -205,6 +217,9 @@ class MultimodalRetriever:
 
     # ---------------- RERANK ----------------
     def _rerank(self, query, hits, generator, top_k):
+
+        if VERBOSE:
+            print("\n=============Rerank Scores==========")
 
         ocr_texts = [self._ocr_page(p, generator) for p in hits]
 
@@ -222,12 +237,10 @@ class MultimodalRetriever:
         for text in ocr_texts:
             t = text.lower()
 
-            # ✅ improved keyword scoring
             exact = sum(1 for w in content_words if w in t)
             partial = sum(1 for w in content_words if any(w in x for x in t.split()))
             keyword_scores.append(exact * 3 + partial * 0.5)
 
-            # ✅ FIXED phrase scoring (no stopwords)
             phrase_bonus = 0
             for n in (2, 3):
                 for i in range(len(q_tokens) - n + 1):
@@ -260,11 +273,31 @@ class MultimodalRetriever:
                 0.10 * phrase_scores[i] +
                 0.05 * number_scores[i]
             )
+
+            page = p.payload.get("page_number")
+
+            if VERBOSE:
+                print(
+                    f"Page {page} | "
+                    f"emb={emb_scores[i]:.3f} | "
+                    f"bm25={bm25_scores[i]:.3f} | "
+                    f"kw={keyword_scores[i]:.3f} | "
+                    f"phrase={phrase_scores[i]:.3f} | "
+                    f"num={number_scores[i]:.3f} | "
+                    f"FINAL={score:.5f}"
+                )
+
             final.append((score, p))
 
         final.sort(key=lambda x: x[0], reverse=True)
 
-        # cleanup
+        if VERBOSE:
+            print("\n================ FINAL TOP PAGES ================\n")
+
+            for i, (score, p) in enumerate(final[:top_k], 1):
+                page = p.payload.get("page_number")
+                print(f"{i}. Page {page} | FINAL={score:.5f}")
+
         del ocr_texts
         aggressive_cleanup()
 
