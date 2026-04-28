@@ -5,8 +5,6 @@ import re
 import math
 from collections import defaultdict
 
-from src.utils import pdf_to_images
-from PIL import Image
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
@@ -46,6 +44,8 @@ def normalize_query(text: str):
 def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
 
+
+# ================= BM25 =================
 
 class BM25:
     def __init__(self, k1=1.5, b=0.75):
@@ -92,12 +92,13 @@ class BM25:
         return score
 
 
+# ================= RETRIEVER =================
+
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
-        self._ocr_cache = {}
-        self._cache_limit = 100
 
+    # -------- Query embedding --------
     def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
@@ -116,41 +117,8 @@ class MultimodalRetriever:
 
         return emb
 
-    def _ocr_page(self, point, generator):
-        key = (point.payload.get("source"), point.payload.get("page_number"))
-
-        if key in self._ocr_cache:
-            return self._ocr_cache[key]
-
-        source, page_num = key
-
-        try:
-            if source.lower().endswith(".pdf"):
-                pages = pdf_to_images(
-                    source,
-                    first_page=page_num + 1,
-                    last_page=page_num + 1
-                )
-                img = pages[0]
-                del pages
-            else:
-                img = Image.open(source)
-
-            text = generator._extract_text(img)
-
-            if len(self._ocr_cache) > self._cache_limit:
-                self._ocr_cache.clear()
-                aggressive_cleanup()
-
-            self._ocr_cache[key] = text
-
-            del img
-            return text
-
-        except Exception:
-            return ""
-
-    def search(self, query_text, top_k=10, source_filter=None, generator=None):
+    # -------- Main search --------
+    def search(self, query_text, top_k=10, source_filter=None):
 
         if VERBOSE:
             print("\n" + query_text + "\n")
@@ -177,11 +145,12 @@ class MultimodalRetriever:
             limit=60,
         ).points
 
+        # normalize scores
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # deduplicate pages
+        # -------- Deduplicate by page --------
         page_best = {}
         for p in results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
@@ -192,33 +161,28 @@ class MultimodalRetriever:
 
         if VERBOSE:
             print(f"Qdrant retrieval done | Candidates: {len(results)}\n")
-            print("==================Initial Ranking===============\n")
-
-            for i, p in enumerate(results[:top_k], 1):
-                page = p.payload.get("page_number")
-                score = p.score if p.score is not None else 0
-                print(f"{i}. Page {page} | score={score:.5f}")
 
         hits = results[:15]
 
-        if generator:
-            return self._rerank(clean_query, hits, generator, top_k)
-        else:
-            return hits[:top_k]
+        return self._rerank(clean_query, hits, top_k)
 
-    def _rerank(self, query, hits, generator, top_k, rrf_k: int = 60):
+    # -------- Reranking (NO OCR here) --------
+    def _rerank(self, query, hits, top_k, rrf_k: int = 60):
 
         if VERBOSE:
             print("\n=============Rerank Scores==========")
 
-        ocr_texts = [self._ocr_page(p, generator) for p in hits]
+        # ✅ USE STORED OCR TEXT
+        ocr_texts = [p.payload.get("ocr_text", "") for p in hits]
 
+        # -------- BM25 --------
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
         q_tokens = tokenize(query)
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
 
+        # -------- Heuristics --------
         content_words = set(q_tokens)
         query_numbers = extract_numbers(query)
 
@@ -247,53 +211,36 @@ class MultimodalRetriever:
             m = max(x) if x else 1
             return [i / (m + 1e-8) for i in x]
 
-        # Normalized scores
         emb_norm    = norm(emb_scores)
         bm25_norm   = norm(bm25_scores)
         kw_norm     = norm(keyword_scores)
         phrase_norm = norm(phrase_scores)
         num_norm    = norm(number_scores)
 
-        #Create ranked lists for each signal 
         indices = list(range(len(hits)))
 
-        emb_ranking    = sorted(indices, key=lambda i: emb_norm[i],    reverse=True)
-        bm25_ranking   = sorted(indices, key=lambda i: bm25_norm[i],   reverse=True)
-        kw_ranking     = sorted(indices, key=lambda i: kw_norm[i],     reverse=True)
-        phrase_ranking = sorted(indices, key=lambda i: phrase_norm[i], reverse=True)
-        num_ranking    = sorted(indices, key=lambda i: num_norm[i],    reverse=True)
+        rankings = [
+            sorted(indices, key=lambda i: emb_norm[i], reverse=True),
+            sorted(indices, key=lambda i: bm25_norm[i], reverse=True),
+            sorted(indices, key=lambda i: kw_norm[i], reverse=True),
+            sorted(indices, key=lambda i: phrase_norm[i], reverse=True),
+            sorted(indices, key=lambda i: num_norm[i], reverse=True),
+        ]
 
-        rankings = [emb_ranking, bm25_ranking, kw_ranking, phrase_ranking, num_ranking]
-
-        #Reciprocal Rank Fusion (RRF)
+        # -------- RRF Fusion --------
         rrf_scores = defaultdict(float)
         for ranking in rankings:
             for rank_pos, idx in enumerate(ranking, start=1):
                 rrf_scores[idx] += 1.0 / (rrf_k + rank_pos)
 
-        # Sort hits by final RRF score
         final_ranking = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
         if VERBOSE:
-            print("\nIndividual Normalized Scores:")
-            for i, p in enumerate(hits):
-                page = p.payload.get("page_number")
-                print(
-                    f"Page {page} | "
-                    f"emb={emb_norm[i]:.3f} | "
-                    f"bm25={bm25_norm[i]:.3f} | "
-                    f"kw={kw_norm[i]:.3f} | "
-                    f"phrase={phrase_norm[i]:.3f} | "
-                    f"num={num_norm[i]:.3f}"
-                )
-
-            print("\n================ FINAL RRF RANKING ================\n")
-            for i, (idx, rrf_score) in enumerate(final_ranking[:top_k], 1):
+            print("\nFinal Ranking:\n")
+            for i, (idx, score) in enumerate(final_ranking[:top_k], 1):
                 page = hits[idx].payload.get("page_number")
-                print(f"{i}. Page {page} | RRF={rrf_score:.5f}")
+                print(f"{i}. Page {page} | RRF={score:.5f}")
 
-        del ocr_texts
         aggressive_cleanup()
 
-        # Return top_k results in final RRF order
         return [hits[idx] for idx, _ in final_ranking[:top_k]]
