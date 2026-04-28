@@ -100,24 +100,24 @@ class MultimodalGenerator:
         # )
 
         # self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
-        self.reader = easyocr.Reader(
-            ['en'],
-            gpu=torch.cuda.is_available(),
-            model_storage_directory="easyocr_models"
-        )
+        # self.reader = easyocr.Reader(
+        #     ['en'],
+        #     gpu=torch.cuda.is_available(),
+        #     model_storage_directory="easyocr_models"
+        # )
 
-        self.pdf_cache = {}
+        # self.pdf_cache = {}
     
-    def _extract_text(self, image: Image.Image) -> str:
-        image=image.convert("RGB")
-        img = np.array(image)
-        results = self.reader.readtext(img)
+    # def _extract_text(self, image: Image.Image) -> str:
+    #     image=image.convert("RGB")
+    #     img = np.array(image)
+    #     results = self.reader.readtext(img)
 
-        texts = [r[1] for r in results]
-        del img, results
-        gc.collect()
+    #     texts = [r[1] for r in results]
+    #     del img, results
+    #     gc.collect()
     
-        return "\n".join(texts)
+    #     return "\n".join(texts)
     # def _extract_text(self, image: Image.Image) -> str:
     #     try:
     #         text = pytesseract.image_to_string(
@@ -149,7 +149,8 @@ class MultimodalGenerator:
 
             images.append(page_img)
 
-            extracted_text = self._extract_text(page_img)
+            # extracted_text = self._extract_text(page_img)
+            extracted_text = point.payload.get("ocr_text", "")
             texts.append(extracted_text)
         combined_text = "\n\n---\n\n".join(texts)
 
