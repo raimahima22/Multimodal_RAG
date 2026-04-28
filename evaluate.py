@@ -73,7 +73,7 @@ class SPDEvaluator:
                 query_text=query,
                 top_k=12,
                 source_filter="data/spd.pdf",
-                generator=self.generator
+                # generator=self.generator
             )
 
             answer = self.generator.generate_answer(query, hits[:3])
