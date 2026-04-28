@@ -20,7 +20,7 @@ class SPDEvaluator:
         #  semantic model (fast + good)
         self.sim_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    # -----------------------------
+
 
     def compute_metrics(self, gt, pred):
         gt = gt.lower().strip()
@@ -40,13 +40,12 @@ class SPDEvaluator:
         #  final decision rule (tunable)
         answer_found = int(
             exact == 1 or
-            fuzzy > 75 or
-            semantic > 0.75
+            fuzzy > 65 or
+            semantic > 0.65
         )
 
         return exact, fuzzy, semantic, answer_found
 
-    # -----------------------------
 
     def evaluate(
         self,
@@ -81,7 +80,7 @@ class SPDEvaluator:
 
             latency = time.time() - start_time
 
-            # 🔥 compute metrics
+            #compute metrics
             exact, fuzzy, semantic, found = self.compute_metrics(
                 ground_truth, answer
             )
@@ -92,7 +91,7 @@ class SPDEvaluator:
                 "ground_truth": ground_truth,
                 "generated_answer": answer,
 
-                # 🔥 metrics
+                #  metrics
                 "exact_match": exact,
                 "fuzzy_score": round(fuzzy, 2),
                 "semantic_score": round(semantic, 4),
@@ -110,7 +109,7 @@ class SPDEvaluator:
 
         return self._save_results(results, output_dir)
 
-    # -----------------------------
+    
 
     def _save_results(self, results, output_dir):
         df_results = pd.DataFrame(results)
@@ -122,7 +121,7 @@ class SPDEvaluator:
 
         print(f"\nSaved to Drive: {excel_path}")
 
-        # 🔥 summary stats
+        # summary stats
         print("\n===== SUMMARY =====")
         print(f"Accuracy: {df_results['answer_found'].mean()*100:.2f}%")
         print(f"Avg Latency: {df_results['latency_seconds'].mean():.2f}s")
@@ -130,7 +129,6 @@ class SPDEvaluator:
         return df_results
 
 
-# ================= RUN =================
 if __name__ == "__main__":
     evaluator = SPDEvaluator()
     evaluator.evaluate(

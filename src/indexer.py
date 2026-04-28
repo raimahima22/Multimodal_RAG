@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from PIL import Image
 import shutil
-# import pytesseract
+import pytesseract
 from src.utils import pdf_to_images
 import re
 import sys
@@ -164,8 +164,18 @@ class MultimodalIndexer:
         aggressive_cleanup()
         return embeddings
 
+    def _extract_ocr_text(self, pil_img: Image.Image) -> str:
+        try:
+            text = pytesseract.image_to_string(pil_img)
+            return text.strip()
+        except Exception as e:
+            print(f"OCR failed: {e}")
+            return ""
+
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
+        extracted_text = self._extract_ocr_text(pil_img)
+
         w, h = pil_img.size
         points = []
 
@@ -197,7 +207,8 @@ class MultimodalIndexer:
                             "x": x,
                             "y": y,
                             "chunk_size": self.chunk_size,
-                            "num_tokens": int(multi_vector.shape[0])
+                            "num_tokens": int(multi_vector.shape[0]),
+                            "ocr_text": extracted_text 
                         }
                     )
                 )
