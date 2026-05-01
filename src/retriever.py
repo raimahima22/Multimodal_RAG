@@ -7,39 +7,35 @@ from collections import defaultdict
 
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
+VERBOSE = True
 
-VERBOSE = True   # turn OFF during bulk evaluation
-
+# ================= STOPWORDS =================
 
 STOPWORDS = {
-    "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
-    "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
-    "when", "where", "who", "which", "do", "does", "did", "was", "were",
-    "be", "been", "being", "has", "have", "had", "by", "from", "about",
-    "under"
+    "what","is","are","the","a","an","of","in","on","at","to",
+    "for","with","and","or","it","its","this","that","how","why",
+    "when","where","who","which","do","does","did","was","were",
+    "be","been","being","has","have","had","by","from","about","under"
 }
 
+# ================= UTILS =================
 
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-
 def to_numpy(x):
     if isinstance(x, torch.Tensor):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
-
 def tokenize(text: str):
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
 
-
 def normalize_query(text: str):
     return " ".join(tokenize(text))
-
 
 def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
@@ -81,7 +77,6 @@ class BM25:
         for t in query_tokens:
             if t not in freq:
                 continue
-
             f = freq[t]
             idf = self.idf.get(t, 0.0)
 
@@ -110,31 +105,35 @@ class MultimodalRetriever:
             elif hasattr(outputs, "query_embeddings"):
                 emb = outputs.query_embeddings[0]
             else:
-                emb = outputs[0] if isinstance(outputs, torch.Tensor) else outputs
+                emb = outputs[0]
 
         emb = to_numpy(emb)
         emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
-
         return emb
 
     # -------- Main search --------
-    def search(self, query_text, top_k=5, source_filter=None):
-        if VERBOSE: print(f"\n🔍 Query: {query_text}")
+    def search(self, query_text, top_k=10, source_filter=None):
 
-        # 1. Extract Multi-Vector for ColQwen
-        # DO NOT NORMALIZE MANUALLY - ColQwen handles its own embedding space
-        inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
-        with torch.no_grad():
-            outputs = self.indexer.model(**inputs)
-            # ColQwen2.5 returns [batch, tokens, dim]
-            query_vec = to_numpy(outputs.query_embeds[0]).tolist()
+        if VERBOSE:
+            print("\nQUERY:", query_text)
+
+        clean_query = normalize_query(query_text)
+        q_tokens = tokenize(clean_query)
+        query_numbers = extract_numbers(query_text)
+
+        emb = self._extract_text_embedding(clean_query)
+        query_vec = emb.tolist()
 
         query_filter = None
         if source_filter:
-            query_filter = Filter(must=[FieldCondition(key="source", match=MatchText(text=source_filter.lower()))])
+            query_filter = Filter(
+                must=[FieldCondition(
+                    key="source",
+                    match=MatchText(text=source_filter.lower())
+                )]
+            )
 
-        # 2. Get 60 candidate tiles
-        raw_results = self.indexer.local_client.query_points(
+        results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec,
             using="image",
@@ -142,47 +141,104 @@ class MultimodalRetriever:
             limit=60,
         ).points
 
-        # 3. CRITICAL: Deduplicate by Page FIRST
-        # This ensures we don't have 10 identical OCR blocks for the same page
-        unique_pages = {}
-        for p in raw_results:
-            page_id = f"{p.payload.get('source')}_{p.payload.get('page_number')}"
-            if page_id not in unique_pages or p.score > unique_pages[page_id].score:
-                unique_pages[page_id] = p
-        
-        # Take the top unique candidates for reranking
-        candidates = sorted(unique_pages.values(), key=lambda x: x.score, reverse=True)[:15]
+        # normalize scores
+        for p in results:
+            if p.score is not None:
+                p.score /= emb.shape[0]
 
-        # 4. Rerank unique pages
-        return self._rerank_hybrid(query_text, candidates, top_k)
+        # ================= PAGE AGGREGATION =================
+        page_best = {}
 
-    def _rerank_hybrid(self, query, hits, top_k):
-        if not hits: return []
-        
-        q_tokens = tokenize(query)
-        q_nums = extract_numbers(query)
-        ocr_corpus = [p.payload.get("ocr_text", "") for p in hits]
-        
+        for p in results:
+            key = (p.payload.get("source"), p.payload.get("page_number"))
+            if key not in page_best:
+                page_best[key] = {
+                    "best_score": p.score,
+                    "page_obj": p,
+                    "ocr_text": p.payload.get("ocr_text", "")
+                }
+            else:
+                if p.score > page_best[key]["best_score"]:
+                    page_best[key]["best_score"] = p.score
+                    page_best[key]["page_obj"] = p
+
+        pages = list(page_best.values())
+        pages = sorted(pages, key=lambda x: x["best_score"], reverse=True)
+
+        hits = [p["page_obj"] for p in pages[:15]]
+        ocr_texts = [p["ocr_text"] for p in pages[:15]]
+
+        if VERBOSE:
+            print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
+
+        return self._rerank(clean_query, q_tokens, query_numbers, hits, ocr_texts, top_k)
+
+    # -------- RERANKING --------
+    def _rerank(self, query, q_tokens, query_numbers, hits, ocr_texts, top_k):
+
+        if VERBOSE:
+            print("\n=============Rerank Scores==========")
+
         bm25 = BM25()
-        bm25.fit(ocr_corpus)
-        
-        scored_hits = []
-        for i, hit in enumerate(hits):
-            text = ocr_corpus[i].lower()
-            
-            # Scores
-            s_neural = hit.score  # MaxSim score from ColQwen
-            s_bm25 = bm25.score(q_tokens, i)
-            
-            # Simple keyword match
-            kw_match = sum(1 for t in q_tokens if t in text) / (len(q_tokens) + 1)
-            
-            # Number Match (Strong signal for financial/tech data)
-            num_match = 2.0 if q_nums and (q_nums & extract_numbers(text)) else 0.0
+        bm25.fit(ocr_texts)
 
-            # Combined Score (Weights: Neural 50%, BM25 20%, Keywords 10%, Numbers 20%)
-            final_score = (s_neural * 2.0) + (s_bm25 * 0.5) + (kw_match * 1.0) + num_match
-            scored_hits.append((final_score, hit))
+        bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
 
-        scored_hits.sort(key=lambda x: x[0], reverse=True)
-        return [h for s, h in scored_hits[:top_k]]
+        keyword_scores, phrase_scores, number_scores = [], [], []
+
+        for text in ocr_texts:
+            t = text.lower()
+
+            exact = sum(1 for w in q_tokens if w in t)
+            partial = sum(1 for w in q_tokens if any(w in x for x in t.split()))
+            keyword_scores.append(exact * 3 + partial * 0.5)
+
+            phrase_bonus = 0
+            for n in (2, 3):
+                for i in range(len(q_tokens) - n + 1):
+                    phrase = " ".join(q_tokens[i:i+n])
+                    if phrase in t:
+                        phrase_bonus += n * 2
+            phrase_scores.append(phrase_bonus)
+
+            nums = extract_numbers(t)
+            number_scores.append(len(nums & query_numbers) * 3)
+
+        emb_scores = [p.score for p in hits]
+
+        def norm(x):
+            m = max(x) if x else 1
+            return [i / (m + 1e-8) for i in x]
+
+        emb_norm    = norm(emb_scores)
+        bm25_norm   = norm(bm25_scores)
+        kw_norm     = norm(keyword_scores)
+        phrase_norm = norm(phrase_scores)
+        num_norm    = norm(number_scores)
+
+        indices = list(range(len(hits)))
+
+        rankings = [
+            sorted(indices, key=lambda i: emb_norm[i], reverse=True),
+            sorted(indices, key=lambda i: bm25_norm[i], reverse=True),
+            sorted(indices, key=lambda i: kw_norm[i], reverse=True),
+            sorted(indices, key=lambda i: phrase_norm[i], reverse=True),
+            sorted(indices, key=lambda i: num_norm[i], reverse=True),
+        ]
+
+        rrf_scores = defaultdict(float)
+        for ranking in rankings:
+            for rank_pos, idx in enumerate(ranking, start=1):
+                rrf_scores[idx] += 1.0 / (60 + rank_pos)
+
+        final_ranking = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+
+        if VERBOSE:
+            print("\nFinal Ranking:\n")
+            for i, (idx, score) in enumerate(final_ranking[:top_k], 1):
+                page = hits[idx].payload.get("page_number")
+                print(f"{i}. Page {page} | RRF={score:.5f}")
+
+        aggressive_cleanup()
+
+        return [hits[idx] for idx, _ in final_ranking[:top_k]]
