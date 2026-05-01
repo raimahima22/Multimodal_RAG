@@ -134,7 +134,7 @@ class MultimodalGenerator:
     
 
 
-    def generate_answer(self, query, retrieved_points):
+    def generate_answer(self, query, retrieved_points,return_usage=False, verbose=False):
         
         start_gen = time.time()
         # 
@@ -220,19 +220,21 @@ class MultimodalGenerator:
                 "total_tokens": usage.get("total_tokens"),
             }
 
-            print(f"Token Usage → Input: {usage_data['input_tokens']} | "
-                  f"Output: {usage_data['output_tokens']} | "
-                  f"Total: {usage_data['total_tokens']}")
-        else:
-            print("Token usage metadata not available.")
+            if verbose:
+                print(f"Token Usage → Input: {usage_data['input_tokens']} | "
+                      f"Output: {usage_data['output_tokens']} | "
+                      f"Total: {usage_data['total_tokens']}")
 
-        print(f"Answer generation time: {gen_time:.2f} seconds")
+        if verbose:
+            print(f"Answer generation time: {gen_time:.2f} seconds")
+
         aggressive_cleanup()
 
-        return {
-            "answer": response.content,
-            "usage": usage_data
-        }
-
-      
-        
+  
+        if return_usage:
+            return {
+                "answer": response.content,
+                "usage": usage_data
+            }
+        else:
+            return response.content
