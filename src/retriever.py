@@ -4,13 +4,11 @@ import gc
 import re
 import math
 from collections import defaultdict
-
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 VERBOSE = True
 
 # ================= STOPWORDS =================
-
 STOPWORDS = {
     "what","is","are","the","a","an","of","in","on","at","to",
     "for","with","and","or","it","its","this","that","how","why",
@@ -40,13 +38,15 @@ def normalize_query(text: str):
 def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
 
-def minmax_norm(x):
+
+def minmax(x):
     if not x:
         return x
     mn, mx = min(x), max(x)
-    if mx - mn < 1e-8:
+    if abs(mx - mn) < 1e-8:
         return [1.0 for _ in x]
     return [(v - mn) / (mx - mn + 1e-8) for v in x]
+
 
 # ================= BM25 =================
 
@@ -77,9 +77,9 @@ class BM25:
         }
 
     def score(self, query_tokens, i):
-        score = 0.0
         freq = self.freqs[i]
         dl = self.doc_lens[i]
+        score = 0.0
 
         for t in query_tokens:
             if t not in freq:
@@ -87,9 +87,9 @@ class BM25:
             f = freq[t]
             idf = self.idf.get(t, 0.0)
 
-            num = f * (self.k1 + 1)
-            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
-            score += idf * num / den
+            score += idf * (f * (self.k1 + 1)) / (
+                f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
+            )
 
         return score
 
@@ -100,7 +100,7 @@ class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    # -------- Query embedding --------
+    # -------- embedding --------
     def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
@@ -118,16 +118,16 @@ class MultimodalRetriever:
         emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
         return emb
 
+
     # ================= SEARCH =================
 
-    def search(self, query_text, top_k=10, source_filter=None):
+    def search(self, query_text, top_k=3, source_filter=None):
 
-        if VERBOSE:
-            print("\nQUERY:", query_text)
+        print("\nQUERY:", query_text)
 
         clean_query = normalize_query(query_text)
         q_tokens = tokenize(clean_query)
-        query_numbers = extract_numbers(query_text)
+        query_nums = extract_numbers(query_text)
 
         emb = self._extract_text_embedding(clean_query)
         query_vec = emb.tolist()
@@ -141,6 +141,8 @@ class MultimodalRetriever:
                 )]
             )
 
+        # ================= QDRANT RETRIEVAL =================
+
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
             query=query_vec,
@@ -149,131 +151,95 @@ class MultimodalRetriever:
             limit=60,
         ).points
 
-        # normalize qdrant scores
+        # normalize embedding score
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # ================= PAGE AGGREGATION =================
+        # ❗ IMPORTANT: DO NOT deduplicate yet (THIS WAS YOUR BUG)
 
-        page_best = {}
-
-        for p in results:
-            key = (p.payload.get("source"), p.payload.get("page_number"))
-
-            if key not in page_best:
-                page_best[key] = {
-                    "best_score": p.score,
-                    "page_obj": p,
-                    "ocr_text": p.payload.get("ocr_text", "")
-                }
-            else:
-                if p.score > page_best[key]["best_score"]:
-                    page_best[key]["best_score"] = p.score
-                    page_best[key]["page_obj"] = p
-
-        pages = list(page_best.values())
-        pages = sorted(pages, key=lambda x: x["best_score"], reverse=True)
-
-        hits = [p["page_obj"] for p in pages[:15]]
-        ocr_texts = [p["ocr_text"] for p in pages[:15]]
-
-        # ================= INITIAL RANKING =================
-
-        print("\n================== INITIAL RANKING ==================\n")
-        for i, p in enumerate(pages[:10], 1):
-            page = p["page_obj"].payload.get("page_number")
-            print(f"{i}. Page {page} | score={p['best_score']:.5f}")
+        hits = sorted(results, key=lambda x: x.score, reverse=True)[:25]
 
         print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
 
-        return self._rerank(clean_query, q_tokens, query_numbers, hits, ocr_texts, top_k)
+        # ================= RERANK =================
 
-    # ================= RERANK =================
-
-    def _rerank(self, query, q_tokens, query_numbers, hits, ocr_texts, top_k):
-
-        print("\n============= RERANK SCORES ==============\n")
+        ocr_texts = [h.payload.get("ocr_text", "") for h in hits]
 
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
         bm25_scores = []
-        keyword_scores = []
+        kw_scores = []
         phrase_scores = []
-        number_scores = []
+        num_scores = []
 
         for text in ocr_texts:
             t = text.lower()
 
-            # keyword
-            exact = sum(1 for w in q_tokens if w in t)
-            partial = sum(1 for w in q_tokens if any(w in x for x in t.split()))
-            keyword_scores.append(exact * 3 + partial * 0.5)
+            kw = sum(1 for w in q_tokens if w in t)
+            kw_scores.append(kw)
 
-            # phrase
-            phrase_bonus = 0
+            phrase = 0
             for n in (2, 3):
                 for i in range(len(q_tokens) - n + 1):
                     if " ".join(q_tokens[i:i+n]) in t:
-                        phrase_bonus += n * 2
-            phrase_scores.append(phrase_bonus)
+                        phrase += 1
+            phrase_scores.append(phrase)
 
-            # numbers
             nums = extract_numbers(t)
-            number_scores.append(len(nums & query_numbers) * 3)
+            num_scores.append(len(nums & query_nums))
 
         for i in range(len(hits)):
             bm25_scores.append(bm25.score(q_tokens, i))
 
-        emb_scores = [p.score for p in hits]
+        emb_scores = [h.score for h in hits]
 
-        # normalize
-        emb_norm    = minmax_norm(emb_scores)
-        bm25_norm   = minmax_norm(bm25_scores)
-        kw_norm     = minmax_norm(keyword_scores)
-        phrase_norm = minmax_norm(phrase_scores)
-        num_norm    = minmax_norm(number_scores)
+        # normalize 0–1
+        emb_n = minmax(emb_scores)
+        bm_n = minmax(bm25_scores)
+        kw_n = minmax(kw_scores)
+        ph_n = minmax(phrase_scores)
+        nm_n = minmax(num_scores)
 
-        # debug print
+        # final score
+        final_scores = []
         for i in range(len(hits)):
-            page = hits[i].payload.get("page_number")
-
-            print(
-                f"Page {page} | "
-                f"emb={emb_norm[i]:.3f} | "
-                f"bm25={bm25_norm[i]:.3f} | "
-                f"kw={kw_norm[i]:.3f} | "
-                f"phrase={phrase_norm[i]:.3f} | "
-                f"num={num_norm[i]:.3f}"
+            score = (
+                0.45 * emb_n[i] +
+                0.20 * bm_n[i] +
+                0.20 * kw_n[i] +
+                0.10 * ph_n[i] +
+                0.05 * nm_n[i]
             )
+            final_scores.append(score)
 
-        # ================= RRF =================
+        ranked = sorted(list(enumerate(final_scores)), key=lambda x: x[1], reverse=True)
 
-        indices = list(range(len(hits)))
+        # ================= PAGE AGGREGATION (ONLY NOW) =================
 
-        rankings = [
-            sorted(indices, key=lambda i: emb_norm[i], reverse=True),
-            sorted(indices, key=lambda i: bm25_norm[i], reverse=True),
-            sorted(indices, key=lambda i: kw_norm[i], reverse=True),
-            sorted(indices, key=lambda i: phrase_norm[i], reverse=True),
-            sorted(indices, key=lambda i: num_norm[i], reverse=True),
-        ]
+        page_best = {}
 
-        rrf_scores = defaultdict(float)
+        for idx, score in ranked:
+            h = hits[idx]
+            key = (h.payload["source"], h.payload["page_number"])
 
-        for ranking in rankings:
-            for rank_pos, idx in enumerate(ranking, start=1):
-                rrf_scores[idx] += 1.0 / (60 + rank_pos)
+            if key not in page_best or score > page_best[key]["score"]:
+                page_best[key] = {
+                    "score": score,
+                    "hit": h
+                }
 
-        final_ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        final_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
+
+        # ================= PRINT FINAL =================
 
         print("\n================ FINAL TOP PAGES ================\n")
 
-        for i, (idx, score) in enumerate(final_ranked[:top_k], 1):
-            page = hits[idx].payload.get("page_number")
-            print(f"{i}. Page {page} | FINAL={score:.5f}")
+        for i, p in enumerate(final_pages[:top_k], 1):
+            page = p["hit"].payload["page_number"]
+            print(f"{i}. Page {page} | FINAL={p['score']:.5f}")
 
         aggressive_cleanup()
 
-        return [hits[idx] for idx, _ in final_ranked[:top_k]]
+        return [p["hit"] for p in final_pages[:top_k]]
