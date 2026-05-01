@@ -8,17 +8,17 @@ from collections import defaultdict
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 
-VERBOSE = True
+VERBOSE = True   # turn OFF during bulk evaluation
+
 
 STOPWORDS = {
-    "what","is","are","the","a","an","of","in","on","at","to",
-    "for","with","and","or","it","its","this","that","how","why",
-    "when","where","who","which","do","does","did","was","were",
-    "be","been","being","has","have","had","by","from","about","under"
+    "what", "is", "are", "the", "a", "an", "of", "in", "on", "at", "to",
+    "for", "with", "and", "or", "it", "its", "this", "that", "how", "why",
+    "when", "where", "who", "which", "do", "does", "did", "was", "were",
+    "be", "been", "being", "has", "have", "had", "by", "from", "about",
+    "under"
 }
 
-
-# ================= UTIL =================
 
 def aggressive_cleanup():
     gc.collect()
@@ -43,42 +43,6 @@ def normalize_query(text: str):
 
 def extract_numbers(text: str):
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
-
-
-# ================= NEW SCORING =================
-
-def answer_span_score(query_tokens, text):
-    """Detect if answer-like span exists"""
-    sentences = re.split(r'[.?!\n]', text.lower())
-    best = 0
-
-    for s in sentences:
-        overlap = sum(1 for t in query_tokens if t in s)
-        if overlap >= 2:
-            best = max(best, overlap * 2)
-
-    return best
-
-
-def proximity_score(query_tokens, text):
-    """Reward tokens appearing close together"""
-    words = text.lower().split()
-    positions = {t: [] for t in query_tokens}
-
-    for i, w in enumerate(words):
-        if w in positions:
-            positions[w].append(i)
-
-    all_pos = [p for v in positions.values() for p in v]
-    if len(all_pos) < 2:
-        return 0
-
-    span = max(all_pos) - min(all_pos) + 1
-    return len(all_pos) / (span + 1)
-
-
-def length_penalty(text):
-    return 1 / math.log(len(text.split()) + 10)
 
 
 # ================= BM25 =================
@@ -134,6 +98,7 @@ class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
+    # -------- Query embedding --------
     def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
@@ -152,14 +117,14 @@ class MultimodalRetriever:
 
         return emb
 
-    # ================= SEARCH =================
-
-    def search(self, query_text, top_k=5, source_filter=None):
+    # -------- Main search --------
+    def search(self, query_text, top_k=10, source_filter=None):
 
         if VERBOSE:
             print("\n" + query_text + "\n")
 
         clean_query = normalize_query(query_text)
+
         emb = self._extract_text_embedding(clean_query)
         query_vec = emb.tolist()
 
@@ -180,12 +145,12 @@ class MultimodalRetriever:
             limit=60,
         ).points
 
-        # Normalize scores
+        # normalize scores
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # Deduplicate pages
+        # -------- Deduplicate by page --------
         page_best = {}
         for p in results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
@@ -194,80 +159,88 @@ class MultimodalRetriever:
 
         results = sorted(page_best.values(), key=lambda x: x.score, reverse=True)
 
+        if VERBOSE:
+            print(f"Qdrant retrieval done | Candidates: {len(results)}\n")
+
         hits = results[:15]
 
         return self._rerank(clean_query, hits, top_k)
 
-    # ================= RERANK =================
+    # -------- Reranking (NO OCR here) --------
+    def _rerank(self, query, hits, top_k, rrf_k: int = 60):
 
-    def _rerank(self, query, hits, top_k):
+        if VERBOSE:
+            print("\n=============Rerank Scores==========")
 
+        # ✅ USE STORED OCR TEXT
         ocr_texts = [p.payload.get("ocr_text", "") for p in hits]
 
+        # -------- BM25 --------
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
         q_tokens = tokenize(query)
+        bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
+
+        # -------- Heuristics --------
+        content_words = set(q_tokens)
         query_numbers = extract_numbers(query)
 
-        scores = []
+        keyword_scores, phrase_scores, number_scores = [], [], []
 
-        for i, text in enumerate(ocr_texts):
+        for text in ocr_texts:
             t = text.lower()
 
-            emb_score = hits[i].score
-            bm25_score = bm25.score(q_tokens, i)
+            exact = sum(1 for w in content_words if w in t)
+            partial = sum(1 for w in content_words if any(w in x for x in t.split()))
+            keyword_scores.append(exact * 3 + partial * 0.5)
 
-            keyword_score = sum(1 for w in q_tokens if w in t)
-            phrase_score = proximity_score(q_tokens, t)
-            num_score = len(extract_numbers(t) & query_numbers)
+            phrase_bonus = 0
+            for n in (2, 3):
+                for i in range(len(q_tokens) - n + 1):
+                    if " ".join(q_tokens[i:i+n]) in t:
+                        phrase_bonus += n * 2
+            phrase_scores.append(phrase_bonus)
 
-            span_score = answer_span_score(q_tokens, t)
-            len_pen = length_penalty(t)
+            nums = extract_numbers(t)
+            number_scores.append(len(nums & query_numbers) * 3)
 
-            final = (
-                0.35 * emb_score +
-                0.25 * bm25_score * len_pen +
-                0.15 * keyword_score +
-                0.10 * phrase_score +
-                0.05 * num_score +
-                0.25 * span_score
-            )
+        emb_scores = [p.score for p in hits]
 
-            scores.append(final)
+        def norm(x):
+            m = max(x) if x else 1
+            return [i / (m + 1e-8) for i in x]
 
-        # Normalize
-        max_s = max(scores) if scores else 1
-        scores = [s / (max_s + 1e-8) for s in scores]
+        emb_norm    = norm(emb_scores)
+        bm25_norm   = norm(bm25_scores)
+        kw_norm     = norm(keyword_scores)
+        phrase_norm = norm(phrase_scores)
+        num_norm    = norm(number_scores)
 
-        ranked = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
+        indices = list(range(len(hits)))
 
-        # ================= DYNAMIC TOP-K =================
-        selected = []
+        rankings = [
+            sorted(indices, key=lambda i: emb_norm[i], reverse=True),
+            sorted(indices, key=lambda i: bm25_norm[i], reverse=True),
+            sorted(indices, key=lambda i: kw_norm[i], reverse=True),
+            sorted(indices, key=lambda i: phrase_norm[i], reverse=True),
+            sorted(indices, key=lambda i: num_norm[i], reverse=True),
+        ]
 
-        if len(ranked) == 0:
-            return []
+        # -------- RRF Fusion --------
+        rrf_scores = defaultdict(float)
+        for ranking in rankings:
+            for rank_pos, idx in enumerate(ranking, start=1):
+                rrf_scores[idx] += 1.0 / (rrf_k + rank_pos)
 
-        selected.append(ranked[0])
-
-        if len(ranked) > 1:
-            gap = scores[ranked[0]] - scores[ranked[1]]
-
-            if gap < 0.15:
-                selected.append(ranked[1])
-
-        if len(ranked) > 2 and len(selected) < 2:
-            selected.append(ranked[2])
-
-        # fallback max
-        selected = selected[:top_k]
+        final_ranking = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
         if VERBOSE:
             print("\nFinal Ranking:\n")
-            for i in selected:
-                page = hits[i].payload.get("page_number")
-                print(f"Page {page} | Score={scores[i]:.4f}")
+            for i, (idx, score) in enumerate(final_ranking[:top_k], 1):
+                page = hits[idx].payload.get("page_number")
+                print(f"{i}. Page {page} | RRF={score:.5f}")
 
         aggressive_cleanup()
 
-        return [hits[i] for i in selected]
+        return [hits[idx] for idx, _ in final_ranking[:top_k]]
