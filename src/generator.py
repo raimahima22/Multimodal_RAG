@@ -14,72 +14,75 @@ from PIL import Image
 from groq import RateLimitError
 import time
 
+load_dotenv('/content/drive/MyDrive/.env')
+
 def create_llm(api_key):
-    return ChatGroq(
+    return ChatOpenAI(
         model_name="meta-llama/llama-4-scout-17b-16e-instruct",
-        groq_api_key=api_key,
+        openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
+        openai_api_base="https://openrouter.ai/api/v1",
         temperature=0.2,
         max_tokens=1024,
     )
 
 
-class GroqLLMWrapper:
-    def __init__(self, keys):
-        self.keys = [k for k in keys if k]
-        if not self.keys:
-            raise ValueError("No GROQ API keys provided")
+# class GroqLLMWrapper:
+#     def __init__(self, keys):
+#         self.keys = [k for k in keys if k]
+#         if not self.keys:
+#             raise ValueError("No GROQ API keys provided")
 
-        self.current_key_index = 0
-        self.llm = create_llm(self.keys[self.current_key_index])
+#         self.current_key_index = 0
+#         self.llm = create_llm(self.keys[self.current_key_index])
 
-    def switch_key(self):
-        self.current_key_index += 1
+#     def switch_key(self):
+#         self.current_key_index += 1
 
-        if self.current_key_index >= len(self.keys):
-            return False
+#         if self.current_key_index >= len(self.keys):
+#             return False
 
-        print(f"Switching to GROQ_API_KEY{self.current_key_index + 1}")
-        self.llm = create_llm(self.keys[self.current_key_index])
-        return True
+#         print(f"Switching to GROQ_API_KEY{self.current_key_index + 1}")
+#         self.llm = create_llm(self.keys[self.current_key_index])
+#         return True
 
-    def invoke(self, messages):
-        last_error = None
+#     def invoke(self, messages):
+#         last_error = None
 
-        while self.current_key_index < len(self.keys):
-            try:
-                return self.llm.invoke(messages)
+#         while self.current_key_index < len(self.keys):
+#             try:
+#                 return self.llm.invoke(messages)
 
-            except Exception as e:
-                last_error = e
-                err_str = str(e).lower()
+#             except Exception as e:
+#                 last_error = e
+#                 err_str = str(e).lower()
 
-                print(f" Error with key {self.current_key_index + 1}: {e}")
+#                 print(f" Error with key {self.current_key_index + 1}: {e}")
 
-                # Detect retry-worthy failures
-                if any(x in err_str for x in [
-                    "rate_limit", "429", "quota", 
-                    "timeout", "connection", "temporarily unavailable"
-                ]):
-                    print(" Trying next API key...")
-                    if not self.switch_key():
-                        break
-                else:
-                    # Unknown error → don't silently skip
-                    raise e
+#                 # Detect retry-worthy failures
+#                 if any(x in err_str for x in [
+#                     "rate_limit", "429", "quota", 
+#                     "timeout", "connection", "temporarily unavailable"
+#                 ]):
+#                     print(" Trying next API key...")
+#                     if not self.switch_key():
+#                         break
+#                 else:
+#                     # Unknown error → don't silently skip
+#                     raise e
 
-        print(" All API keys exhausted")
-        raise RuntimeError(f"ALL_KEYS_FAILED: {last_error}")
-load_dotenv('/content/drive/MyDrive/.env')
+#         print(" All API keys exhausted")
+#         raise RuntimeError(f"ALL_KEYS_FAILED: {last_error}")
+
 def aggressive_cleanup():
     
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-GROQ_KEYS = [
-    os.environ.get("GROQ_API_KEY"),
-    os.environ.get("GROQ_API_KEY2"),
-    os.environ.get("GROQ_API_KEY3"),
-]
+# GROQ_KEYS = [
+#     os.environ.get("GROQ_API_KEY"),
+#     os.environ.get("GROQ_API_KEY2"),
+#     os.environ.get("GROQ_API_KEY3"),
+# ]
 
 class MultimodalGenerator:
     def __init__(self):
@@ -89,7 +92,8 @@ class MultimodalGenerator:
         #     temperature=0.2,      # Lower for more factual answers
         #     max_tokens=1024,
         # )
-        self.llm = GroqLLMWrapper(GROQ_KEYS)
+        # self.llm = GroqLLMWrapper(GROQ_KEYS)
+        self.llm = create_llm()
         # self.llm = ChatOpenAI(
         #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
         #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
