@@ -10,10 +10,9 @@ VERBOSE = True
 
 # ================= STOPWORDS =================
 STOPWORDS = {
-    "the","a","an","in","on","at","to",
-    "with","this","that","how","why",
-    
-    
+    "what", "is", "are", "the", "a", "an",
+    "in", "on", "at", "to", "of",
+    "and", "or"
 }
 
 # ================= UTILS =================
@@ -213,6 +212,11 @@ class MultimodalRetriever:
             final_scores.append(score)
 
         ranked = sorted(list(enumerate(final_scores)), key=lambda x: x[1], reverse=True)
+
+        print("\n================ INITIAL RERANKED RESULTS (TOP 10) ================\n")
+        for i, (idx, score) in enumerate(ranked[:10], 1):
+            h = hits[idx]
+            print(f"{i}. Page {h.payload['page_number']} | Score={score:.5f}")
 
         # ================= PAGE AGGREGATION (ONLY NOW) =================
 
