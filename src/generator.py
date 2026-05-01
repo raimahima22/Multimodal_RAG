@@ -199,17 +199,40 @@ class MultimodalGenerator:
         gen_time = time.time() - start_gen
 
         #token usage
+        # if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        #     usage = response.usage_metadata
+        #     print(f"Token Usage → Input: {usage.get('input_tokens', 'N/A')} | "
+        #           f"Output: {usage.get('output_tokens', 'N/A')} | "
+        #           f"Total: {usage.get('total_tokens', 'N/A')}")
+        # else:
+        #     print("Token usage metadata not available.")
+
+        # print(f"Answer generation time: {gen_time:.2f} seconds")
+        # aggressive_cleanup()
+        # return response.content
+
+        usage_data = {}
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
-            print(f"Token Usage → Input: {usage.get('input_tokens', 'N/A')} | "
-                  f"Output: {usage.get('output_tokens', 'N/A')} | "
-                  f"Total: {usage.get('total_tokens', 'N/A')}")
+            usage_data = {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+            }
+
+            print(f"Token Usage → Input: {usage_data['input_tokens']} | "
+                  f"Output: {usage_data['output_tokens']} | "
+                  f"Total: {usage_data['total_tokens']}")
         else:
             print("Token usage metadata not available.")
 
         print(f"Answer generation time: {gen_time:.2f} seconds")
         aggressive_cleanup()
-        return response.content
+
+        return {
+            "answer": response.content,
+            "usage": usage_data
+        }
 
       
         

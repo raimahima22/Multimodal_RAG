@@ -17,27 +17,20 @@ class SPDEvaluator:
         self.retriever = MultimodalRetriever(self.indexer)
         self.generator = MultimodalGenerator()
 
-        #  semantic model (fast + good)
         self.sim_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-
-
+    # ================= METRICS =================
     def compute_metrics(self, gt, pred):
         gt = gt.lower().strip()
         pred = pred.lower().strip()
 
-        #  exact match
         exact = int(gt == pred)
-
-        #  fuzzy match
         fuzzy = fuzz.token_set_ratio(gt, pred)
 
-        #  semantic similarity
         emb1 = self.sim_model.encode(gt, convert_to_tensor=True)
         emb2 = self.sim_model.encode(pred, convert_to_tensor=True)
         semantic = float(util.cos_sim(emb1, emb2))
 
-        #  final decision rule (tunable)
         answer_found = int(
             exact == 1 or
             fuzzy > 65 or
@@ -46,92 +39,107 @@ class SPDEvaluator:
 
         return exact, fuzzy, semantic, answer_found
 
-
+    # ================= EVALUATION =================
     def evaluate(
         self,
         excel_path="/content/drive/MyDrive/Question_samples.xlsx",
-        output_dir="/content/drive/MyDrive/evaluation_results2"
+        output_path="/content/drive/MyDrive/evaluation_results/SPD_Evaluation.xlsx"
     ):
-        print(f"Reading questions from: {excel_path}")
-
         df = pd.read_excel(excel_path)
         df.columns = ["question", "ground_truth"]
 
-        results = []
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 🔥 Resume logic
+        if output_path.exists():
+            results_df = pd.read_excel(output_path)
+            completed_ids = set(results_df["id"].tolist())
+            print(f"Resuming: {len(completed_ids)} already done")
+        else:
+            results_df = pd.DataFrame()
+            completed_ids = set()
 
         for idx, row in df.iterrows():
+
+            if idx in completed_ids:
+                continue  # skip completed
+
             query = str(row["question"]).strip()
             ground_truth = str(row["ground_truth"]).strip()
 
-            print(f"[{idx+1}/{len(df)}] {query[:80]}...")
+            print(f"\n[{idx+1}/{len(df)}] {query[:80]}...")
 
             start_time = time.time()
 
+            # -------- RETRIEVE --------
             hits = self.retriever.search(
                 query_text=query,
                 top_k=12,
                 source_filter="data/spd.pdf",
-                # generator=self.generator
             )
 
-            answer = self.generator.generate_answer(query, hits[:3])
+            # -------- GENERATE --------
+            gen_output = self.generator.generate_answer(query, hits[:3])
+
+            answer = gen_output.get("answer", "")
+            usage = gen_output.get("usage", {})
+
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            total_tokens = usage.get("total_tokens")
 
             latency = time.time() - start_time
 
-            #compute metrics
+            # -------- METRICS --------
             exact, fuzzy, semantic, found = self.compute_metrics(
                 ground_truth, answer
             )
 
-            results.append({
+            new_row = {
                 "id": idx,
                 "question": query,
                 "ground_truth": ground_truth,
                 "generated_answer": answer,
 
-                #  metrics
                 "exact_match": exact,
                 "fuzzy_score": round(fuzzy, 2),
                 "semantic_score": round(semantic, 4),
                 "answer_found": found,
 
-                # performance
                 "latency_seconds": round(latency, 2),
+
+                # 🔥 TOKEN INFO (REAL, NOT ESTIMATED)
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
 
                 "retrieved_pages": ", ".join(
                     [f"Page {p.payload.get('page_number')}" for p in hits[:5]]
                 ),
 
                 "timestamp": datetime.now().isoformat()
-            })
+            }
 
-        return self._save_results(results, output_dir)
+            # 🔥 Append + SAVE IMMEDIATELY
+            results_df = pd.concat(
+                [results_df, pd.DataFrame([new_row])],
+                ignore_index=True
+            )
 
-    
+            results_df.to_excel(output_path, index=False)
 
-    def _save_results(self, results, output_dir):
-        df_results = pd.DataFrame(results)
+            print(f" Saved → {output_path}")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        excel_path = output_dir / f"SPD_Evaluation_{timestamp}.xlsx"
+        # -------- SUMMARY --------
+        print("\n===== FINAL SUMMARY =====")
+        print(f"Accuracy: {results_df['answer_found'].mean()*100:.2f}%")
+        print(f"Avg Latency: {results_df['latency_seconds'].mean():.2f}s")
+        print(f"Avg Tokens: {results_df['total_tokens'].mean():.0f}")
 
-        df_results.to_excel(excel_path, index=False)
-
-        print(f"\nSaved to Drive: {excel_path}")
-
-        # summary stats
-        print("\n===== SUMMARY =====")
-        print(f"Accuracy: {df_results['answer_found'].mean()*100:.2f}%")
-        print(f"Avg Latency: {df_results['latency_seconds'].mean():.2f}s")
-
-        return df_results
+        return results_df
 
 
 if __name__ == "__main__":
     evaluator = SPDEvaluator()
-    evaluator.evaluate(
-        excel_path="/content/drive/MyDrive/Question_samples.xlsx",
-        output_dir="/content/drive/MyDrive/evaluation_results"
-    )
+    evaluator.evaluate()

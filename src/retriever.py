@@ -10,9 +10,7 @@ VERBOSE = True
 
 # ================= STOPWORDS =================
 STOPWORDS = {
-    "what", "is", "are", "the", "a", "an",
-    "in", "on", "at", "to", "of",
-    "and", "or"
+     "the", "a", "an"
 }
 
 # ================= UTILS =================
