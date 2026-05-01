@@ -137,7 +137,7 @@ class MultimodalGenerator:
         images = []
         context_texts = []
 
-        for point in retrieved_points:
+        for i, point in retrieved_points:
             source = point.payload['source']
             page_num = point.payload.get('page_number', 0)
 
