@@ -135,24 +135,25 @@ class MultimodalGenerator:
         start_gen = time.time()
         # 
         images = []
-        # texts = []
+        texts = []
 
         for point in retrieved_points:
             source = point.payload['source']
             page_num = point.payload.get('page_number', 0)
 
-             # single page load instead of full PDF
-            if str(source).lower().endswith('.pdf'):
-                page_img = get_pdf_page(source, page_num, dpi=300)
-            else:
-                page_img = Image.open(source).convert("RGB")
+            ocr_text = point.payload.get("ocr_text", "No text extracted for this page.")
+            context_texts.append(f"[Source: {source}, Page: {page_num}]\n{ocr_text}")
 
-            images.append(page_img)
+            if i < 3: # Only load images for top 3 to save time/bandwidth
+                if str(source).lower().endswith('.pdf'):
+                    page_img = get_pdf_page(source, page_num, dpi=300)
+                else:
+                    page_img = Image.open(source).convert("RGB")
+                images.append(page_img)
 
             # extracted_text = self._extract_text(page_img)
-        #     extracted_text = point.payload.get("ocr_text", "")
-        #     texts.append(extracted_text)
-        # combined_text = "\n\n---\n\n".join(texts)
+            
+        
 
         image_messages = [
             {
@@ -163,6 +164,7 @@ class MultimodalGenerator:
             }
             for img in images[:3]
         ]
+        combined_context = "\n\n---\n\n".join(context_texts)
         message = HumanMessage(
             content=[
                 {
@@ -177,7 +179,8 @@ class MultimodalGenerator:
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
-     
+        OCR TEXT CONTEXT:
+        {combined_context}
         
         QUESTION:
         {query}

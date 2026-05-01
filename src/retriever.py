@@ -226,12 +226,12 @@ class MultimodalRetriever:
             len_pen = length_penalty(t)
 
             final = (
-                0.35 * emb_score +
-                0.25 * bm25_score * len_pen +
-                0.15 * keyword_score +
-                0.10 * phrase_score +
+                0.45 * emb_score +
+                0.20 * bm25_score * len_pen +
+                0.10 * keyword_score +
+                0.05 * phrase_score +
                 0.05 * num_score +
-                0.25 * span_score
+                0.30 * span_score
             )
 
             scores.append(final)
