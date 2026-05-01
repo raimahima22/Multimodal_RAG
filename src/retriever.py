@@ -9,9 +9,7 @@ from qdrant_client.models import Filter, FieldCondition, MatchText
 VERBOSE = True
 
 # ================= STOPWORDS =================
-STOPWORDS = {
-     "the", "a", "an"
-}
+STOPWORDS = {"the", "a", "an"}
 
 # ================= UTILS =================
 
@@ -97,7 +95,6 @@ class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    # -------- embedding --------
     def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
@@ -120,7 +117,8 @@ class MultimodalRetriever:
 
     def search(self, query_text, top_k=3, source_filter=None):
 
-        print("\nQUERY:", query_text)
+        print("\n================ QUERY ================")
+        print(query_text)
 
         clean_query = normalize_query(query_text)
         q_tokens = tokenize(clean_query)
@@ -148,16 +146,23 @@ class MultimodalRetriever:
             limit=60,
         ).points
 
-        # normalize embedding score
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
         hits = sorted(results, key=lambda x: x.score, reverse=True)[:25]
 
-        print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
+        # ================= INITIAL RANKING =================
 
-        # ================= RERANK =================
+        print("\n================ INITIAL RANKING (Qdrant) ================\n")
+
+        for i, h in enumerate(hits[:10], 1):
+            page = h.payload["page_number"]
+            print(f"{i}. Page {page} | score={h.score:.5f}")
+
+        print(f"\nCandidates after Qdrant: {len(hits)}")
+
+        # ================= RERANK PREP =================
 
         ocr_texts = [h.payload.get("ocr_text", "") for h in hits]
 
@@ -190,14 +195,14 @@ class MultimodalRetriever:
 
         emb_scores = [h.score for h in hits]
 
-        # normalize 0–1
         emb_n = minmax(emb_scores)
         bm_n = minmax(bm25_scores)
         kw_n = minmax(kw_scores)
         ph_n = minmax(phrase_scores)
         nm_n = minmax(num_scores)
 
-        # final score
+        # ================= FINAL SCORING =================
+
         final_scores = []
         for i in range(len(hits)):
             score = (
@@ -211,7 +216,9 @@ class MultimodalRetriever:
 
         ranked = sorted(list(enumerate(final_scores)), key=lambda x: x[1], reverse=True)
 
-        # ================= PAGE AGGREGATION (ONLY NOW) =================
+        # ================= FINAL PRINT =================
+
+        print("\n================ FINAL RERANKED RESULTS ================\n")
 
         page_best = {}
 
@@ -220,16 +227,9 @@ class MultimodalRetriever:
             key = (h.payload["source"], h.payload["page_number"])
 
             if key not in page_best or score > page_best[key]["score"]:
-                page_best[key] = {
-                    "score": score,
-                    "hit": h
-                }
+                page_best[key] = {"score": score, "hit": h}
 
         final_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
-
-        # ================= PRINT FINAL =================
-
-        print("\n================ FINAL TOP PAGES ================\n")
 
         for i, p in enumerate(final_pages[:top_k], 1):
             page = p["hit"].payload["page_number"]
