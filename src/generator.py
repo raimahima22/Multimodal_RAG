@@ -21,7 +21,7 @@ from groq import RateLimitError
 #   - Enough context to handle multi-page answers
 #   - Stays well under token limits
 #   - Additional pages rarely change the answer meaningfully
-MAX_IMAGES = 3
+MAX_IMAGES = 5
 
 # LLM render resolution.  150 DPI is sufficient for text-heavy PDFs and cuts
 # image token cost by ~75 % vs 300 DPI.  Bump to 200 only if you see LLM
