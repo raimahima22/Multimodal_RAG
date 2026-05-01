@@ -161,7 +161,19 @@ class MultimodalGenerator:
             # extracted_text = self._extract_text(page_img)
             extracted_text = point.payload.get("ocr_text", "")
             texts.append(extracted_text)
-        combined_text = "\n\n---\n\n".join(texts)
+        # combined_text = "\n\n---\n\n".join(texts)
+        combined_text = ""
+
+        for i, (point, text) in enumerate(zip(retrieved_points, texts), 1):
+            page = point.payload.get("page_number")
+
+            combined_text += f"""
+        [Document {i} | Page {page} | Rank {i}]
+
+        {text}
+
+        ---------------------
+        """
 
         image_messages = [
             {
@@ -183,6 +195,10 @@ class MultimodalGenerator:
         Guidelines:
         - Answer clearly, concisely and directly. Do NOT explain your reasoning process or compare different plans unless specifically asked to do so.
         - Be natural and professional
+        -Documents are ranked by relevance (Rank 1 = most relevant)
+        - Prefer higher ranked documents when answering
+        - Use lower ranked documents if needed
+
         - Use bullet points only when they improve readability
         - Do NOT explain step-by-step unless asked
        
