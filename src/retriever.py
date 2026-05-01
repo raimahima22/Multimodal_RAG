@@ -6,8 +6,20 @@ import math
 from collections import defaultdict
 
 from qdrant_client.models import Filter, FieldCondition, MatchText
+from sentence_transformers import CrossEncoder
 
 VERBOSE = True
+
+# ================= CONFIG =================
+
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+CROSS_TOP_K = 5   # rerank only top N pages
+
+# ================= LOAD CROSS ENCODER =================
+
+cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+
+# ================= STOPWORDS =================
 
 STOPWORDS = {
     "what","is","are","the","a","an","of","in","on","at","to",
@@ -108,7 +120,7 @@ class MultimodalRetriever:
         return emb
 
     # -------- MAIN SEARCH --------
-    def search(self, query_text, top_k=5, source_filter=None):
+    def search(self, query_text, top_k=1, source_filter=None):
 
         if VERBOSE:
             print("\n" + query_text + "\n")
@@ -137,12 +149,11 @@ class MultimodalRetriever:
             limit=80,
         ).points
 
-        # normalize embedding score by token count
         for p in results:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # -------- PAGE AGGREGATION (STRONG FIX) --------
+        # -------- PAGE AGGREGATION --------
         page_chunks = defaultdict(list)
 
         for p in results:
@@ -153,46 +164,33 @@ class MultimodalRetriever:
 
         for key, chunks in page_chunks.items():
             scores = [c.score for c in chunks if c.score is not None]
-
             if not scores:
                 continue
 
-            # combine max + mean (important)
             agg_score = max(scores) + 0.3 * np.mean(scores)
-
             best_chunk = max(chunks, key=lambda x: x.score or 0)
             best_chunk.score = agg_score
             pages.append(best_chunk)
 
         pages = sorted(pages, key=lambda x: x.score, reverse=True)
 
-        if VERBOSE:
-            print(f"After aggregation: {len(pages)} pages\n")
-
-        # take top pages for rerank
         candidates = pages[:25]
 
-        return self._rerank(clean_query, q_tokens, query_nums, candidates, top_k)
+        return self._rerank(query_text, clean_query, q_tokens, query_nums, candidates, top_k)
 
-    # -------- RERANK (NO CROSS ENCODER) --------
-    def _rerank(self, query, q_tokens, query_nums, hits, top_k):
-
-        if VERBOSE:
-            print("\n============= RERANK =============\n")
+    # -------- RERANK --------
+    def _rerank(self, raw_query, query, q_tokens, query_nums, hits, top_k):
 
         texts = [p.payload.get("ocr_text", "") for p in hits]
         emb_scores = [p.score for p in hits]
 
-        # -------- HARD FILTERING --------
+        # -------- HARD FILTER --------
         filtered = []
         for i, text in enumerate(texts):
-
             if len(text) < 40:
                 continue
-
             if not any(w in text.lower() for w in q_tokens):
                 continue
-
             filtered.append(i)
 
         if filtered:
@@ -205,31 +203,27 @@ class MultimodalRetriever:
         bm25.fit(texts)
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(texts))]
 
-        # -------- KEYWORD + PHRASE + NUMERIC --------
+        # -------- KEYWORD / NUMERIC --------
         keyword_scores = []
 
         for text in texts:
             t = text.lower()
             score = 0
 
-            # word match
             score += sum(2.0 for w in q_tokens if w in t)
 
-            # phrase match
             for n in (2, 3):
                 for i in range(len(q_tokens) - n + 1):
                     phrase = " ".join(q_tokens[i:i+n])
                     if phrase in t:
                         score += n * 3.5
 
-            # numeric match (VERY IMPORTANT)
             nums = extract_numbers(t)
             overlap = len(query_nums & nums)
             score += overlap * 5.0
 
             keyword_scores.append(score)
 
-        # -------- NORMALIZE ONLY WEAK SIGNALS --------
         def norm(x):
             m = max(x) if x else 1.0
             return [i / (m + 1e-8) for i in x]
@@ -237,28 +231,45 @@ class MultimodalRetriever:
         bm25_norm = norm(bm25_scores)
         kw_norm = norm(keyword_scores)
 
-        # -------- FINAL WEIGHTED SCORE (NO RRF) --------
-        final_scores = []
+        # -------- PRELIM SCORE --------
+        prelim_scores = []
 
         for i in range(len(hits)):
             score = (
-                0.65 * emb_scores[i] +   # dominant
+                0.65 * emb_scores[i] +
                 0.20 * kw_norm[i] +
                 0.15 * bm25_norm[i]
             )
-            final_scores.append(score)
+            prelim_scores.append(score)
 
         ranked = sorted(
-            list(enumerate(final_scores)),
+            list(enumerate(prelim_scores)),
             key=lambda x: x[1],
             reverse=True
         )
 
+        # -------- CROSS-ENCODER FINAL STEP --------
+        top_indices = [idx for idx, _ in ranked[:CROSS_TOP_K]]
+        cross_inputs = [(raw_query, texts[i]) for i in top_indices]
+
+        cross_scores = cross_encoder.predict(cross_inputs)
+
+        final_candidates = []
+        for i, idx in enumerate(top_indices):
+            final_score = (
+                0.7 * cross_scores[i] +
+                0.3 * prelim_scores[idx]
+            )
+            final_candidates.append((idx, final_score))
+
+        final_ranked = sorted(final_candidates, key=lambda x: x[1], reverse=True)
+
         if VERBOSE:
-            for i, (idx, score) in enumerate(ranked[:top_k], 1):
+            print("\nFinal Ranking (with Cross-Encoder):\n")
+            for i, (idx, score) in enumerate(final_ranked[:top_k], 1):
                 page = hits[idx].payload.get("page_number")
-                print(f"{i}. Page {page} | Final={score:.4f} | Emb={emb_scores[idx]:.4f}")
+                print(f"{i}. Page {page} | Final={score:.4f}")
 
         aggressive_cleanup()
 
-        return [hits[idx] for idx, _ in ranked[:top_k]]
+        return [hits[idx] for idx, _ in final_ranked[:top_k]]
