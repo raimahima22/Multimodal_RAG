@@ -162,89 +162,84 @@ class MultimodalRetriever:
         if VERBOSE:
             print(f"Qdrant retrieval done | Candidates: {len(results)}\n")
 
-        hits = results[:30]
+        hits = results[:15]
 
         return self._rerank(clean_query, hits, top_k)
 
     # -------- Reranking (NO OCR here) --------
-    def _rerank(self, query, hits, top_k=5, rrf_k: int = 80):
+    def _rerank(self, query, hits, top_k, rrf_k: int = 60):
+
         if VERBOSE:
             print("\n=============Rerank Scores==========")
 
+        # USE STORED OCR TEXT
         ocr_texts = [p.payload.get("ocr_text", "") for p in hits]
-        emb_scores = [p.score for p in hits]                    # ColQwen visual embedding score
 
-        # -------- BM25 (still useful but lower weight) --------
+        # -------- BM25 --------
         bm25 = BM25()
         bm25.fit(ocr_texts)
+
         q_tokens = tokenize(query)
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
 
-        # -------- Stronger Insurance-specific Heuristics --------
-        keyword_scores = []
-        benefits_boost_terms = {
-            "coinsurance", "copayment", "copay", "injection", "injections", 
-            "injectable", "infusion", "allergy", "gold", "ppo", "deductible", 
-            "in-network", "out-of-network", "specialist"
-        }
+        # -------- Heuristics --------
+        content_words = set(q_tokens)
+        query_numbers = extract_numbers(query)
+
+        keyword_scores, phrase_scores, number_scores = [], [], []
 
         for text in ocr_texts:
-            t_lower = text.lower()
-            score = 0
+            t = text.lower()
 
-            # Exact benefit term matches (high weight)
-            for term in benefits_boost_terms:
-                if term in t_lower:
-                    score += 4.0
+            exact = sum(1 for w in content_words if w in t)
+            partial = sum(1 for w in content_words if any(w in x for x in t.split()))
+            keyword_scores.append(exact * 3 + partial * 0.5)
 
-            # Query word matches
-            score += sum(2.5 for w in q_tokens if w in t_lower)
-
-            # Phrase bonus for multi-word queries
             phrase_bonus = 0
             for n in (2, 3):
                 for i in range(len(q_tokens) - n + 1):
-                    phrase = " ".join(q_tokens[i:i+n])
-                    if phrase in t_lower:
-                        phrase_bonus += n * 3
-            score += phrase_bonus
+                    if " ".join(q_tokens[i:i+n]) in t:
+                        phrase_bonus += n * 2
+            phrase_scores.append(phrase_bonus)
 
-            keyword_scores.append(score)
+            nums = extract_numbers(t)
+            number_scores.append(len(nums & query_numbers) * 3)
 
-        # -------- Normalization --------
+        emb_scores = [p.score for p in hits]
+
         def norm(x):
-            m = max(x) if x else 1.0
+            m = max(x) if x else 1
             return [i / (m + 1e-8) for i in x]
 
         emb_norm    = norm(emb_scores)
         bm25_norm   = norm(bm25_scores)
         kw_norm     = norm(keyword_scores)
+        phrase_norm = norm(phrase_scores)
+        num_norm    = norm(number_scores)
 
-        # -------- Weighted RRF Fusion --------
+        indices = list(range(len(hits)))
+
         rankings = [
-            sorted(range(len(hits)), key=lambda i: emb_norm[i],   reverse=True),   # Visual embedding (strongest)
-            sorted(range(len(hits)), key=lambda i: bm25_norm[i],  reverse=True),
-            sorted(range(len(hits)), key=lambda i: kw_norm[i],    reverse=True),
+            sorted(indices, key=lambda i: emb_norm[i], reverse=True),
+            sorted(indices, key=lambda i: bm25_norm[i], reverse=True),
+            sorted(indices, key=lambda i: kw_norm[i], reverse=True),
+            sorted(indices, key=lambda i: phrase_norm[i], reverse=True),
+            sorted(indices, key=lambda i: num_norm[i], reverse=True),
         ]
 
-        # Higher weight to visual embedding because OCR is noisy on tables
-        weights = [3.5, 1.8, 1.0]
-
+        # -------- RRF Fusion --------
         rrf_scores = defaultdict(float)
-        for weight, ranking in zip(weights, rankings):
+        for ranking in rankings:
             for rank_pos, idx in enumerate(ranking, start=1):
-                rrf_scores[idx] += weight / (rrf_k + rank_pos)
+                rrf_scores[idx] += 1.0 / (rrf_k + rank_pos)
 
-        # Final ranking
         final_ranking = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
         if VERBOSE:
-            print("\nFinal Ranking (after improved rerank):\n")
+            print("\nFinal Ranking:\n")
             for i, (idx, score) in enumerate(final_ranking[:top_k], 1):
-                page = hits[idx].payload.get('page_number')
-                emb_s = emb_scores[idx]
-                kw_s  = keyword_scores[idx]
-                print(f"{i}. Page {page:3d} | RRF={score:.5f} | Emb={emb_s:.4f} | KW={kw_s:.1f}")
+                page = hits[idx].payload.get("page_number")
+                print(f"{i}. Page {page} | RRF={score:.5f}")
 
         aggressive_cleanup()
 
