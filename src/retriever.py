@@ -172,7 +172,7 @@ class MultimodalRetriever:
         if VERBOSE:
             print("\n=============Rerank Scores==========")
 
-        # USE STORED OCR TEXT
+        # ✅ USE STORED OCR TEXT
         ocr_texts = [p.payload.get("ocr_text", "") for p in hits]
 
         # -------- BM25 --------
