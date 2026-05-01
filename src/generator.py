@@ -16,7 +16,7 @@ import time
 
 load_dotenv('/content/drive/MyDrive/.env')
 
-def create_llm(api_key):
+def create_llm():
     return ChatOpenAI(
         model_name="meta-llama/llama-4-scout-17b-16e-instruct",
         openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
