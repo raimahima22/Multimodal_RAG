@@ -165,7 +165,7 @@ class MultimodalGenerator:
                     "url": f"data:image/jpeg;base64,{pil_to_base64(img)}"
                 }
             }
-            for img in images[:3]
+            for img in images[:5]
         ]
         message = HumanMessage(
             content=[
