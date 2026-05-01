@@ -10,10 +10,9 @@ VERBOSE = True
 
 # ================= STOPWORDS =================
 STOPWORDS = {
-    "what","is","are","the","a","an","of","in","on","at","to",
-    "for","with","and","or","it","its","this","that","how","why",
-    "when","where","who","which","do","does","did","was","were",
-    "be","been","being","has","have","had","by","from","about","under"
+    "what", "is", "are", "the", "a", "an",
+    "in", "on", "at", "to", "of",
+    "and", "or"
 }
 
 # ================= UTILS =================
@@ -156,8 +155,6 @@ class MultimodalRetriever:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        # ❗ IMPORTANT: DO NOT deduplicate yet (THIS WAS YOUR BUG)
-
         hits = sorted(results, key=lambda x: x.score, reverse=True)[:25]
 
         print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
@@ -206,9 +203,9 @@ class MultimodalRetriever:
         final_scores = []
         for i in range(len(hits)):
             score = (
-                0.45 * emb_n[i] +
+                0.50 * emb_n[i] +
                 0.20 * bm_n[i] +
-                0.20 * kw_n[i] +
+                0.15 * kw_n[i] +
                 0.10 * ph_n[i] +
                 0.05 * nm_n[i]
             )
