@@ -43,7 +43,7 @@ def main(force_reindex: bool = False):
     generator = MultimodalGenerator()
 
     print("Warming up model...")
-    _ = retriever._extract_query_embeddings("warmup query")
+    _ = retriever._extract_text_embedding("warmup query")
     print("Ready!")
 
     # INDEXING
