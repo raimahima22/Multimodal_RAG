@@ -135,7 +135,7 @@ class MultimodalGenerator:
         start_gen = time.time()
         # 
         images = []
-        texts = []
+        context_texts = []
 
         for point in retrieved_points:
             source = point.payload['source']
