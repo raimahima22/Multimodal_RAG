@@ -7,12 +7,9 @@ from collections import defaultdict
 from qdrant_client.models import Filter, FieldCondition, MatchText
 
 VERBOSE = True
-
-# We keep a lighter stopword list to ensure "How" or "Under" 
-# doesn't get nuked before the embedding model sees it.
 STOPWORDS = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "and", "or"}
 
-# ================= IMPROVED UTILS =================
+# ================= UTILS =================
 
 def aggressive_cleanup():
     gc.collect()
@@ -25,28 +22,21 @@ def to_numpy(x):
     return np.asarray(x, dtype=np.float32)
 
 def soft_tokenize(text: str):
-    """
-    FIX: Added missing function.
-    Preserves alphanumeric strings and basic punctuation 
-    to help neural models maintain context.
-    """
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
 
 def fuzzy_match_score(query_tokens, text):
-    """Handles minor OCR glitches by checking partial overlaps."""
     text = text.lower()
     score = 0
     for token in query_tokens:
         if len(token) < 3: continue 
         if token in text:
             score += 1
-        # Middle-chunk match for OCR errors (e.g., 'prof1t' for 'profit')
         elif len(token) > 4 and token[1:-1] in text: 
             score += 0.5
     return score
 
-# ================= BM25 =================
+# ================= BM25 (For Hybrid Reranking) =================
 
 class BM25:
     def __init__(self, k1=1.5, b=0.75):
@@ -57,22 +47,14 @@ class BM25:
         self.tokenized = [soft_tokenize(doc) for doc in corpus]
         self.doc_lens = [len(d) for d in self.tokenized]
         self.avgdl = sum(self.doc_lens) / max(1, len(self.tokenized))
-
         df = defaultdict(int)
         self.freqs = []
-
         for doc in self.tokenized:
             freq = defaultdict(int)
-            for t in doc:
-                freq[t] += 1
+            for t in doc: freq[t] += 1
             self.freqs.append(freq)
-            for t in set(doc):
-                df[t] += 1
-
-        self.idf = {
-            t: math.log((len(self.tokenized) - n + 0.5) / (n + 0.5) + 1)
-            for t, n in df.items()
-        }
+            for t in set(doc): df[t] += 1
+        self.idf = {t: math.log((len(self.tokenized) - n + 0.5) / (n + 0.5) + 1) for t, n in df.items()}
 
     def score(self, query_tokens, i):
         score = 0.0
@@ -82,66 +64,62 @@ class BM25:
             if t not in freq: continue
             f = freq[t]
             idf = self.idf.get(t, 0.0)
-            num = f * (self.k1 + 1)
-            den = f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl))
-            score += idf * num / den
+            score += idf * (f * (self.k1 + 1)) / (f + self.k1 * (1 - self.b + self.b * dl / max(1, self.avgdl)))
         return score
 
-# ================= RETRIEVER =================
+# ================= MULTIMODAL RETRIEVER (ColQwen2.5 Optimized) =================
 
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    def _extract_text_embedding(self, query_text):
-        # We process the query AS IS (no pre-tokenization) 
-        # so the model sees the full sentence structure.
+    def _extract_query_embeddings(self, query_text: str):
+        """
+        MODIFIED: Returns the full Multi-Vector matrix required for ColPali/ColQwen.
+        """
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
         with torch.no_grad():
             outputs = self.indexer.model(**inputs)
-            # Support for different ColPali/SigLIP output formats
+            
+            # ColQwen2.5 typically returns [Batch, Tokens, Dim]
             if hasattr(outputs, "query_embeds"):
                 emb = outputs.query_embeds[0]
-            elif hasattr(outputs, "query_embeddings"):
-                emb = outputs.query_embeddings[0]
             else:
-                emb = outputs[0] if isinstance(outputs, torch.Tensor) else outputs
+                emb = outputs[0]
 
-        emb = to_numpy(emb)
-        # Ensure it's a 1D vector for Qdrant
-        if len(emb.shape) > 1:
-            emb = np.mean(emb, axis=0)
-            
-        emb = emb / (np.linalg.norm(emb) + 1e-8)
-        return emb
+        # Convert to list of lists for Qdrant multi-vector compatibility
+        return to_numpy(emb).tolist()
 
     def search(self, query_text, top_k=5, source_filter=None):
-        if VERBOSE: print(f"\n🔍 Query: {query_text}")
+        if VERBOSE: print(f"\n🔍 ColQwen Search: {query_text}")
 
-        query_vec = self._extract_text_embedding(query_text).tolist()
+        # 1. Multi-Vector Extraction
+        query_multi_vec = self._extract_query_embeddings(query_text)
         
         query_filter = None
         if source_filter:
-            query_filter = Filter(must=[FieldCondition(key="source", match=MatchText(text=source_filter.lower()))])
+            query_filter = Filter(must=[
+                FieldCondition(key="source", match=MatchText(text=source_filter.lower()))
+            ])
 
-        # Recall phase
+        # 2. Recall phase (Using MaxSim logic defined in Indexer)
         raw_results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
-            query=query_vec,
+            query=query_multi_vec,
             using="image",
             query_filter=query_filter,
-            limit=100, 
+            limit=60, # Increased recall as MaxSim is computationally heavier but more accurate
         ).points
 
-        # Deduplicate
+        # 3. Deduplicate by page (Highest patch score wins for the page)
         page_best = {}
         for p in raw_results:
             key = (p.payload.get("source"), p.payload.get("page_number"))
             if key not in page_best or p.score > page_best[key].score:
                 page_best[key] = p
         
-        candidates = sorted(page_best.values(), key=lambda x: x.score, reverse=True)[:25]
+        candidates = sorted(page_best.values(), key=lambda x: x.score, reverse=True)[:20]
         
         return self._rerank_hybrid(query_text, candidates, top_k)
 
@@ -153,43 +131,43 @@ class MultimodalRetriever:
         corpus = [p.payload.get("ocr_text", "") for p in hits]
         
         bm25 = BM25()
-        bm25.fit(corpus)
+        if corpus: bm25.fit(corpus)
 
         for i, hit in enumerate(hits):
             text = hit.payload.get("ocr_text", "").lower()
             
-            # 1. Neural Score
+            # 1. Neural Score (This is already the MaxSim score from ColQwen)
+            # ColQwen scores are usually higher than standard cosine, so we weight it heavily.
             s_neural = hit.score 
             
-            # 2. Keyword/Fuzzy match
+            # 2. Keyword Match
             s_fuzzy = fuzzy_match_score(q_tokens, text) / (len(q_tokens) + 1)
             
-            # 3. Number match (Weight increased: missing a year is a dealbreaker)
+            # 3. Number match (Crucial for financial/tech data)
             found_nums = set(re.findall(r"\d+", text))
-            s_num = 2.0 if q_numbers and (q_numbers & found_nums) else 0.0
+            s_num = 3.0 if q_numbers and (q_numbers & found_nums) else 0.0
             
             # 4. BM25
-            s_bm25 = bm25.score(q_tokens, i)
+            s_bm25 = bm25.score(q_tokens, i) if corpus else 0.0
             
             # Fused Score calculation
-            # Weights: Neural (40%), Fuzzy (30%), BM25 (10%), Numbers (20% boost)
-            final_score = (s_neural * 2.5) + (s_fuzzy * 1.5) + (s_bm25 * 0.5) + s_num
+            # We trust ColQwen's MaxSim score much more than the previous average embeddings.
+            final_score = (s_neural * 1.2) + (s_fuzzy * 1.5) + (s_bm25 * 0.5) + s_num
             
             scored_hits.append((final_score, hit))
 
         scored_hits.sort(key=lambda x: x[0], reverse=True)
         
-        # Dynamic Top-K Selection
+        # Dynamic thresholding
         final_selection = []
         if scored_hits:
             top_score = scored_hits[0][0]
             for s, h in scored_hits[:top_k]:
-                # Only keep if score is competitive (avoids adding 'noise' pages)
-                if s > (top_score * 0.55):
+                if s > (top_score * 0.5): # Keep results within 50% of the top hit
                     final_selection.append(h)
 
         if VERBOSE:
-            print(f"✅ Reranked {len(hits)} down to {len(final_selection)} relevant pages.")
+            print(f" Reranked {len(hits)} down to {len(final_selection)} relevant pages.")
 
         aggressive_cleanup()
         return final_selection
