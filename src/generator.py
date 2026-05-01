@@ -94,6 +94,11 @@ class MultimodalGenerator:
         # )
         # self.llm = GroqLLMWrapper(GROQ_KEYS)
         self.llm = create_llm()
+        self.last_usage = {
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None
+        }
         # self.llm = ChatOpenAI(
         #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
         #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
@@ -134,7 +139,7 @@ class MultimodalGenerator:
     
 
 
-    def generate_answer(self, query, retrieved_points,return_usage=False, verbose=False):
+    def generate_answer(self, query, retrieved_points):
         
         start_gen = time.time()
         # 
@@ -199,42 +204,28 @@ class MultimodalGenerator:
         gen_time = time.time() - start_gen
 
         #token usage
-        # if hasattr(response, 'usage_metadata') and response.usage_metadata:
-        #     usage = response.usage_metadata
-        #     print(f"Token Usage → Input: {usage.get('input_tokens', 'N/A')} | "
-        #           f"Output: {usage.get('output_tokens', 'N/A')} | "
-        #           f"Total: {usage.get('total_tokens', 'N/A')}")
-        # else:
-        #     print("Token usage metadata not available.")
-
-        # print(f"Answer generation time: {gen_time:.2f} seconds")
-        # aggressive_cleanup()
-        # return response.content
-
-        usage_data = {}
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
-            usage_data = {
+
+            self.last_usage = {
                 "input_tokens": usage.get("input_tokens"),
                 "output_tokens": usage.get("output_tokens"),
                 "total_tokens": usage.get("total_tokens"),
             }
 
-            if verbose:
-                print(f"Token Usage → Input: {usage_data['input_tokens']} | "
-                      f"Output: {usage_data['output_tokens']} | "
-                      f"Total: {usage_data['total_tokens']}")
-
-        if verbose:
-            print(f"Answer generation time: {gen_time:.2f} seconds")
-
-        aggressive_cleanup()
-
-  
-        if return_usage:
-            return {
-                "answer": response.content,
-                "usage": usage_data
-            }
+            print(f"Token Usage → Input: {self.last_usage['input_tokens']} | "
+                  f"Output: {self.last_usage['output_tokens']} | "
+                  f"Total: {self.last_usage['total_tokens']}")
         else:
-            return response.content
+            self.last_usage = {
+                "input_tokens": None,
+                "output_tokens": None,
+                "total_tokens": None
+            }
+
+        print(f"Answer generation time: {gen_time:.2f} seconds")
+        aggressive_cleanup()
+        return response.content
+
+      
+        

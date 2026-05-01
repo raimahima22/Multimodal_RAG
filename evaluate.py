@@ -80,10 +80,17 @@ class SPDEvaluator:
             )
 
             # -------- GENERATE --------
-            gen_output = self.generator.generate_answer(query, hits[:3])
+            # gen_output = self.generator.generate_answer(query, hits[:3])
 
-            answer = gen_output.get("answer", "")
-            usage = gen_output.get("usage", {})
+            # answer = gen_output.get("answer", "")
+            # usage = gen_output.get("usage", {})
+            answer = self.generator.generate_answer(query, hits[:3])
+
+            usage = self.generator.last_usage
+
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            total_tokens = usage.get("total_tokens")
 
             input_tokens = usage.get("input_tokens")
             output_tokens = usage.get("output_tokens")
