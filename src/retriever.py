@@ -160,13 +160,25 @@ class MultimodalRetriever:
         print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
 
         # ================= RERANK =================
+        ocr_texts=[]
+        for h in hits:
+            patch_ocr = h.payload.get("patch_ocr", "")
+            page_ocr = h.payload.get("page_ocr", "")
+            
+            # Smart selection: prefer patch if meaningful, else use page
+            if len(patch_ocr) > 40:
+                ocr_texts.append(patch_ocr)
+            else:
+                ocr_texts.append(page_ocr)
 
-        ocr_texts = [h.payload.get("ocr_text", "") for h in hits]
+        
 
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
-        bm25_scores = []
+        # bm25_scores = []
+        bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
+        emb_scores = [h.score for h in hits]
         kw_scores = []
         phrase_scores = []
         num_scores = []
@@ -187,10 +199,10 @@ class MultimodalRetriever:
             nums = extract_numbers(t)
             num_scores.append(len(nums & query_nums))
 
-        for i in range(len(hits)):
-            bm25_scores.append(bm25.score(q_tokens, i))
+        # for i in range(len(hits)):
+        #     bm25_scores.append(bm25.score(q_tokens, i))
 
-        emb_scores = [h.score for h in hits]
+        # emb_scores = [h.score for h in hits]
 
         # normalize 0–1
         emb_n = minmax(emb_scores)

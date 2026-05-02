@@ -172,46 +172,106 @@ class MultimodalIndexer:
             print(f"OCR failed: {e}")
             return ""
 
+    # def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
+    #     start_page = time.time()
+    #     extracted_text = self._extract_ocr_text(pil_img)
+
+    #     w, h = pil_img.size
+    #     points = []
+
+    #     y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
+    #     if y_coords and y_coords[-1] + self.chunk_size < h:
+    #         y_coords.append(h - self.chunk_size)
+
+    #     x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
+    #     if x_coords and x_coords[-1] + self.chunk_size < w:
+    #         x_coords.append(w - self.chunk_size)
+
+    #     y_coords = sorted(set(y_coords))
+    #     x_coords = sorted(set(x_coords))
+
+    #     for y in y_coords:
+    #         for x in x_coords:
+    #             patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
+    #             multi_vector = self._extract_image_embeddings(patch)
+
+    #             point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
+
+    #             points.append(
+    #                 PointStruct(
+    #                     id=point_id,
+    #                     vector={"image": multi_vector.tolist()},
+    #                     payload={
+    #                         "page_number": page_num,
+    #                         "source": str(source),
+    #                         "x": x,
+    #                         "y": y,
+    #                         "chunk_size": self.chunk_size,
+    #                         "num_tokens": int(multi_vector.shape[0]),
+    #                         "ocr_text": extracted_text 
+    #                     }
+    #                 )
+    #             )
+
+    #     if points:
+    #         self.local_client.upsert(
+    #             collection_name=self.collection_name,
+    #             points=points,
+    #             wait=True
+    #         )
+
+    #     page_time = time.time() - start_page
+    #     print(f"Page {page_num} completed: {page_time:.2f}s ")
+    #     aggressive_cleanup()
+    #     return page_time
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         start_page = time.time()
-        extracted_text = self._extract_ocr_text(pil_img)
-
+    
+        # Page-level OCR (once)
+        page_ocr = self._extract_ocr_text(pil_img).strip()
+    
         w, h = pil_img.size
         points = []
 
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
         if y_coords and y_coords[-1] + self.chunk_size < h:
             y_coords.append(h - self.chunk_size)
-
         x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
         if x_coords and x_coords[-1] + self.chunk_size < w:
             x_coords.append(w - self.chunk_size)
 
-        y_coords = sorted(set(y_coords))
-        x_coords = sorted(set(x_coords))
-
         for y in y_coords:
             for x in x_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
+            
+                # Patch-level OCR (but optimized)
+                patch_ocr = self._extract_ocr_text(patch).strip()
+            
+                # Optional: Only store patch_ocr if it has decent content
+                if len(patch_ocr) < 20:   # too short, probably not useful
+                    patch_ocr = ""
+
                 multi_vector = self._extract_image_embeddings(patch)
 
                 point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
 
                 points.append(
-                    PointStruct(
-                        id=point_id,
-                        vector={"image": multi_vector.tolist()},
-                        payload={
-                            "page_number": page_num,
-                            "source": str(source),
-                            "x": x,
-                            "y": y,
-                            "chunk_size": self.chunk_size,
-                            "num_tokens": int(multi_vector.shape[0]),
-                            "ocr_text": extracted_text 
+                   PointStruct(
+                       id=point_id,
+                       vector={"image": multi_vector.tolist()},
+                       payload={
+                           "page_number": page_num,
+                           "source": str(source),
+                           "x": x,
+                           "y": y,
+                           "chunk_size": self.chunk_size,
+                           "num_tokens": int(multi_vector.shape[0]),
+                           "page_ocr": page_ocr,          # Full page context
+                           "patch_ocr": patch_ocr,        # Local text
+                           "ocr_text": page_ocr           # backward compatibility
                         }
                     )
-                )
+                )   
 
         if points:
             self.local_client.upsert(
@@ -219,11 +279,11 @@ class MultimodalIndexer:
                 points=points,
                 wait=True
             )
-
         page_time = time.time() - start_page
         print(f"Page {page_num} completed: {page_time:.2f}s ")
         aggressive_cleanup()
         return page_time
+
 
     def index_document(self, pdf_path: str):
         start_doc = time.time()
