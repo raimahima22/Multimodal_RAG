@@ -244,10 +244,10 @@ class MultimodalIndexer:
             for x in x_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
             
-                # Patch-level OCR (but optimized)
+                # Patch-level OCR 
                 patch_ocr = self._extract_ocr_text(patch).strip()
             
-                # Optional: Only store patch_ocr if it has decent content
+                # Only store patch_ocr if it has decent content
                 if len(patch_ocr) < 20:   # too short, probably not useful
                     patch_ocr = ""
 

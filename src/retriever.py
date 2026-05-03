@@ -47,7 +47,6 @@ def minmax(x):
     return [(v - mn) / (mx - mn + 1e-8) for v in x]
 
 
-# ================= BM25 =================
 
 class BM25:
     def __init__(self, k1=1.5, b=0.75):
@@ -93,13 +92,11 @@ class BM25:
         return score
 
 
-# ================= RETRIEVER =================
-
 class MultimodalRetriever:
     def __init__(self, indexer):
         self.indexer = indexer
 
-    # -------- embedding --------
+    # embedding 
     def _extract_text_embedding(self, query_text):
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
@@ -118,7 +115,7 @@ class MultimodalRetriever:
         return emb
 
 
-    # ================= SEARCH =================
+    # search function
 
     def search(self, query_text, top_k=3, source_filter=None):
 
@@ -140,7 +137,7 @@ class MultimodalRetriever:
                 )]
             )
 
-        # ================= QDRANT RETRIEVAL =================
+        #qdrant retrieval
 
         results = self.indexer.local_client.query_points(
             collection_name=self.indexer.collection_name,
@@ -159,7 +156,7 @@ class MultimodalRetriever:
 
         print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
 
-        # ================= RERANK =================
+        # rerank
         ocr_texts=[]
         for h in hits:
             patch_ocr = h.payload.get("patch_ocr", "")
@@ -230,14 +227,14 @@ class MultimodalRetriever:
             h = hits[idx]
             print(f"{i}. Page {h.payload['page_number']} | Score={score:.5f}")
 
-        # ================= PAGE AGGREGATION (ONLY NOW) =================
+        #page aggregation
 
         page_best = {}
 
         for idx, score in ranked:
             h = hits[idx]
             key = (h.payload["source"], h.payload["page_number"])
-
+            #keep only the best patch for unique pages
             if key not in page_best or score > page_best[key]["score"]:
                 page_best[key] = {
                     "score": score,
@@ -246,7 +243,7 @@ class MultimodalRetriever:
 
         final_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
 
-        # ================= PRINT FINAL =================
+        
 
         print("\n================ FINAL TOP PAGES ================\n")
 

@@ -92,7 +92,7 @@ def main(force_reindex: bool = False):
 
 
         try:
-            hits = retriever.search(query, top_k=5, source_filter=source_filter)
+            hits = retriever.search(query, top_k=3, source_filter=source_filter)
 
             if not hits:
                 return "No relevant documents found."

@@ -14,7 +14,6 @@ report = f"""
 - Accuracy: {df['answer_found'].mean()*100:.2f}%
 - Avg Latency: {df['latency_seconds'].mean():.2f}s
 - Fastest: {df['latency_seconds'].min():.2f}s
-- Slowest: {df['latency_seconds'].max():.2f}s
 
 ## Quality Metrics
 - Avg Fuzzy Score: {df['fuzzy_score'].mean():.2f}
