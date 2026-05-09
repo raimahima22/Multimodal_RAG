@@ -127,7 +127,7 @@ Aggregates retrieved chunks at the page level to improve contextual coherence du
 | OCR Engine | Tesseract OCR |
 | LLM | Llama 4 Scout |
 | Framework | LangChain |
-| PDF Processing | PyMuPDF |
+| PDF Processing | pdf2image |
 | Image Processing | PIL / Pillow |
 | Deep Learning Framework | PyTorch |
 | Retrieval Pipeline | Hybrid Retrieval |
