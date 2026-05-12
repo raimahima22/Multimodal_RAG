@@ -430,7 +430,7 @@ def main(force_reindex: bool = False):
                 )
 
                 gr.Markdown(
-                    "## ⚡ Example Questions"
+                    "##  Example Questions"
                 )
 
                 gr.Examples(
@@ -455,18 +455,14 @@ def main(force_reindex: bool = False):
                             "specialist referrals?",
                             "Both Documents"
                         ],
-                        [
-                            "What are the "
-                            "out-of-pocket limits?",
-                            "Both Documents"
-                        ],
+                        
                     ],
                     inputs=[
                         msg,
                         source_dropdown
                     ],
                     cache_examples=False,
-                    elem_classes="examples"
+                    # elem_classes="examples"
                 )
 
                 clear_btn = gr.Button(
