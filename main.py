@@ -541,18 +541,16 @@ def main(force_reindex=False):
 
     # ── UI ────────────────────────────────────────────────────────────────────
     custom_css = """
-    /* ---------- Google Fonts ---------- */
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
 
     * { box-sizing: border-box; }
 
     body, .gradio-container {
-        font-family: 'DM Sans', sans-serif !important;
-        background: #0f1117 !important;
-        color: #e8eaf0 !important;
+        font-family: 'Lato', sans-serif !important;
+        background: #f5f0e8 !important;
+        color: #2c2a26 !important;
     }
 
-    /* Hide Gradio footer */
     footer { display: none !important; }
 
     /* ── App shell ── */
@@ -560,62 +558,36 @@ def main(force_reindex=False):
         display: flex;
         height: 100vh;
         overflow: hidden;
-        background: #0f1117;
+        background: #f5f0e8;
     }
 
     /* ── Sidebar ── */
     #sidebar {
         width: 260px;
         min-width: 260px;
-        background: #161b27;
-        border-right: 1px solid #2a2f3d;
+        background: #ede8de;
+        border-right: 1px solid #d8d0c0;
         padding: 28px 20px;
         display: flex;
         flex-direction: column;
-        gap: 24px;
+        gap: 20px;
     }
 
-    #sidebar .sidebar-title {
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: -0.3px;
-        color: #c8d0e0;
-        margin: 0 0 4px 0;
+    .sidebar-title {
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+        color: #2c2a26;
+        margin: 0 0 2px 0;
     }
 
-    #sidebar .sidebar-sub {
-        font-size: 12px;
-        color: #5a6178;
+    .sidebar-sub {
+        font-size: 11px;
+        color: #9a9080;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin-bottom: 8px;
-    }
-
-    /* ── Source pills ── */
-    .source-pill-group {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .source-pill {
-        padding: 10px 14px;
-        border-radius: 10px;
-        border: 1px solid #2a2f3d;
-        background: #1e2435;
-        color: #8892aa;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        text-align: left;
-    }
-
-    .source-pill:hover,
-    .source-pill.active {
-        background: #2a3250;
-        border-color: #4a6fa5;
-        color: #c8d8f8;
+        letter-spacing: 1px;
+        margin-bottom: 6px;
+        margin-top: 4px;
     }
 
     /* ── Status badge ── */
@@ -624,9 +596,9 @@ def main(force_reindex=False):
         align-items: center;
         gap: 7px;
         font-size: 12px;
-        color: #5a9e6f;
-        background: #0d2018;
-        border: 1px solid #1a4030;
+        color: #4a7c59;
+        background: #e4f0e8;
+        border: 1px solid #b8d8c0;
         border-radius: 20px;
         padding: 5px 12px;
         width: fit-content;
@@ -635,14 +607,14 @@ def main(force_reindex=False):
     .status-dot {
         width: 7px;
         height: 7px;
-        background: #3ecf6c;
+        background: #4a9e6a;
         border-radius: 50%;
         animation: pulse 2s infinite;
     }
 
     @keyframes pulse {
         0%, 100% { opacity: 1; }
-        50%       { opacity: 0.4; }
+        50%       { opacity: 0.35; }
     }
 
     /* ── Main chat area ── */
@@ -651,140 +623,143 @@ def main(force_reindex=False):
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        background: #faf8f4;
     }
 
     /* ── Chat header ── */
     #chat-header {
         padding: 20px 28px 16px;
-        border-bottom: 1px solid #1e2435;
-        background: #0f1117;
+        border-bottom: 1px solid #e0d8cc;
+        background: #faf8f4;
     }
 
     #chat-header h1 {
-        font-size: 22px;
-        font-weight: 600;
+        font-size: 21px;
+        font-weight: 700;
         margin: 0;
-        color: #e0e6f0;
-        letter-spacing: -0.4px;
+        color: #2c2a26;
+        letter-spacing: -0.3px;
     }
 
     #chat-header p {
         font-size: 13px;
-        color: #4a5268;
+        color: #8a8070;
         margin: 4px 0 0;
     }
 
-    /* ── Chatbot bubbles ── */
-    .chatbot-wrap { flex: 1; overflow-y: auto; padding: 16px 28px; }
-
-    /* Gradio chatbot override */
+    /* ── Chatbot ── */
     #chatbot {
         background: transparent !important;
         border: none !important;
     }
 
-    #chatbot .message-wrap { gap: 16px !important; }
+    #chatbot .message-wrap { gap: 14px !important; }
 
+    /* User bubble — warm sand */
     #chatbot .user .message {
-        background: #2a3560 !important;
-        border: 1px solid #3a4878 !important;
-        color: #d8e4ff !important;
+        background: #e8e0d0 !important;
+        border: 1px solid #d0c8b8 !important;
+        color: #2c2a26 !important;
         border-radius: 18px 18px 4px 18px !important;
         font-size: 14px !important;
         max-width: 72% !important;
     }
 
+    /* Bot bubble — clean white */
     #chatbot .bot .message {
-        background: #1a1f2e !important;
-        border: 1px solid #252c40 !important;
-        color: #c8d0e0 !important;
+        background: #ffffff !important;
+        border: 1px solid #e0d8cc !important;
+        color: #2c2a26 !important;
         border-radius: 4px 18px 18px 18px !important;
         font-size: 14px !important;
-        font-family: 'DM Sans', sans-serif !important;
+        font-family: 'Lato', sans-serif !important;
         max-width: 84% !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
     }
 
     #chatbot .bot .message code {
-        font-family: 'DM Mono', monospace !important;
-        background: #0d1020 !important;
-        color: #88c0d0 !important;
-        padding: 1px 5px;
+        font-family: 'Source Code Pro', monospace !important;
+        background: #f0ece4 !important;
+        color: #5a4a2a !important;
+        padding: 1px 6px;
         border-radius: 4px;
         font-size: 12px;
     }
 
     #chatbot .bot .message hr {
-        border-color: #2a3040 !important;
+        border-color: #e8e0d0 !important;
         margin: 10px 0 !important;
     }
 
+    #chatbot .bot .message strong { color: #3a3628 !important; }
+
     /* ── Input row ── */
     #input-row {
-        padding: 16px 28px 20px;
-        border-top: 1px solid #1e2435;
-        background: #0f1117;
+        padding: 14px 28px 18px;
+        border-top: 1px solid #e0d8cc;
+        background: #faf8f4;
         display: flex;
         gap: 10px;
         align-items: flex-end;
     }
 
     #msg-box textarea {
-        background: #161b27 !important;
-        border: 1px solid #2a2f3d !important;
+        background: #ffffff !important;
+        border: 1px solid #d0c8b8 !important;
         border-radius: 14px !important;
-        color: #e0e6f0 !important;
-        font-family: 'DM Sans', sans-serif !important;
+        color: #2c2a26 !important;
+        font-family: 'Lato', sans-serif !important;
         font-size: 14px !important;
         padding: 12px 16px !important;
         resize: none !important;
-        transition: border-color 0.15s ease;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
 
     #msg-box textarea:focus {
-        border-color: #4a6fa5 !important;
+        border-color: #8a7a5a !important;
         outline: none !important;
-        box-shadow: 0 0 0 3px rgba(74,111,165,0.15) !important;
+        box-shadow: 0 0 0 3px rgba(138,122,90,0.12) !important;
     }
 
-    #msg-box textarea::placeholder { color: #3a4258 !important; }
+    #msg-box textarea::placeholder { color: #b0a890 !important; }
 
     #send-btn {
-        background: #3a5fb8 !important;
-        color: #fff !important;
+        background: #5a4a2a !important;
+        color: #faf8f4 !important;
         border: none !important;
         border-radius: 12px !important;
         padding: 12px 22px !important;
-        font-family: 'DM Sans', sans-serif !important;
+        font-family: 'Lato', sans-serif !important;
         font-size: 14px !important;
-        font-weight: 500 !important;
+        font-weight: 700 !important;
         cursor: pointer !important;
         transition: background 0.15s ease, transform 0.1s ease;
         height: 46px;
         white-space: nowrap;
     }
 
-    #send-btn:hover:not(:disabled)  { background: #4a72d8 !important; }
+    #send-btn:hover:not(:disabled)  { background: #6e5c38 !important; }
     #send-btn:active                 { transform: scale(0.97); }
-    #send-btn:disabled               { background: #1e2638 !important; color: #3a4258 !important; cursor: not-allowed !important; }
+    #send-btn:disabled               { background: #d0c8b8 !important; color: #a09880 !important; cursor: not-allowed !important; }
 
     /* ── Dropdown override ── */
-    .gr-dropdown select,
-    select {
-        background: #1a1f2e !important;
-        color: #c8d0e0 !important;
-        border: 1px solid #2a2f3d !important;
+    select, .gr-dropdown select {
+        background: #ffffff !important;
+        color: #2c2a26 !important;
+        border: 1px solid #d0c8b8 !important;
         border-radius: 10px !important;
         font-size: 13px !important;
+        font-family: 'Lato', sans-serif !important;
     }
 
     /* ── Clear button ── */
     #clear-btn {
         background: transparent !important;
-        border: 1px solid #2a2f3d !important;
-        color: #5a6178 !important;
+        border: 1px solid #d0c8b8 !important;
+        color: #8a8070 !important;
         border-radius: 10px !important;
         font-size: 13px !important;
-        font-family: 'DM Sans', sans-serif !important;
+        font-family: 'Lato', sans-serif !important;
         padding: 8px 14px !important;
         cursor: pointer !important;
         transition: all 0.15s;
@@ -792,25 +767,34 @@ def main(force_reindex=False):
 
     #clear-btn:hover {
         border-color: #c0392b !important;
-        color: #e74c3c !important;
+        color: #c0392b !important;
+        background: #fdf0ee !important;
     }
 
     /* ── Examples ── */
-    .gr-examples { margin-top: 12px; }
+    .gr-examples { margin-top: 10px; }
     .gr-examples button {
-        background: #161b27 !important;
-        border: 1px solid #252c40 !important;
-        color: #7a8aaa !important;
+        background: #ede8de !important;
+        border: 1px solid #d0c8b8 !important;
+        color: #6a6050 !important;
         border-radius: 8px !important;
         font-size: 12px !important;
         padding: 6px 12px !important;
-        font-family: 'DM Mono', monospace !important;
+        font-family: 'Source Code Pro', monospace !important;
         transition: all 0.15s;
     }
 
     .gr-examples button:hover {
-        border-color: #4a6fa5 !important;
-        color: #a8c0e8 !important;
+        background: #e0d8c8 !important;
+        border-color: #8a7a5a !important;
+        color: #3a3020 !important;
+    }
+
+    /* ── Label text (Gradio internals) ── */
+    label, .block label span, .gr-form label {
+        color: #4a4438 !important;
+        font-family: 'Lato', sans-serif !important;
+        font-size: 13px !important;
     }
     """
 
@@ -818,8 +802,9 @@ def main(force_reindex=False):
         css=custom_css,
         title="RAG Assistant",
         theme=gr.themes.Base(
-            primary_hue="blue",
-            neutral_hue="slate",
+            primary_hue="stone",
+            neutral_hue="stone",
+            font=gr.themes.GoogleFont("Lato"),
         ),
     ) as demo:
 
@@ -829,7 +814,7 @@ def main(force_reindex=False):
             with gr.Column(elem_id="sidebar", scale=0, min_width=260):
                 gr.HTML("""
                     <div class="sidebar-title">RAG Assistant</div>
-                    <div style="font-size:12px;color:#3a4258;margin-top:2px;">
+                    <div style="font-size:12px;color:#9a9080;margin-top:2px;">
                         Vision-Language Document QA
                     </div>
                 """)
