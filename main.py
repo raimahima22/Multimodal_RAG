@@ -13,15 +13,9 @@ from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
 
-# =========================================================
-# CONFIG
-# =========================================================
 HISTORY_FILE = "chat_history.json"
 
 
-# =========================================================
-# SAVE CHAT HISTORY
-# =========================================================
 def save_to_history(query, source_input, answer):
 
     history_data = []
@@ -45,6 +39,7 @@ def save_to_history(query, source_input, answer):
     )
 
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+
         json.dump(
             history_data,
             f,
@@ -53,9 +48,6 @@ def save_to_history(query, source_input, answer):
         )
 
 
-# =========================================================
-# CLEANUP
-# =========================================================
 def aggressive_cleanup():
 
     gc.collect()
@@ -64,16 +56,10 @@ def aggressive_cleanup():
         torch.cuda.empty_cache()
 
 
-# =========================================================
-# MAIN
-# =========================================================
-def main(force_reindex: bool = False):
+def main(force_reindex=False):
 
-    print("\n Initializing Multimodal RAG System...\n")
+    print("\nInitializing Multimodal RAG System...\n")
 
-    # -----------------------------------------------------
-    # INITIALIZE COMPONENTS
-    # -----------------------------------------------------
     indexer = MultimodalIndexer(
         force_recreate=force_reindex
     )
@@ -82,49 +68,37 @@ def main(force_reindex: bool = False):
 
     generator = MultimodalGenerator()
 
-    # -----------------------------------------------------
-    # WARMUP
-    # -----------------------------------------------------
-    print(" Warming up retrieval model...")
+    print("Warming up retrieval model...")
 
     _ = retriever._extract_text_embedding(
         "warmup query"
     )
 
-    print(" System Ready!\n")
+    print("System Ready!\n")
 
-    # -----------------------------------------------------
-    # INDEXING
-    # -----------------------------------------------------
-    print(" Checking document index...\n")
+    print("Checking document index...\n")
 
     if force_reindex or indexer.is_collection_empty():
 
-        print(" Indexing documents...\n")
+        print("Indexing documents...\n")
 
         indexer.index_all_data("data")
 
-        print("\n Indexing completed!\n")
+        print("Indexing completed!\n")
 
     else:
 
         print(
-            " Existing index found. "
+            "Existing index found. "
             "Skipping indexing.\n"
         )
 
-    # -----------------------------------------------------
-    # SOURCE OPTIONS
-    # -----------------------------------------------------
     source_options = {
         "Both Documents": None,
         "SBC": "data/sbc.pdf",
         "SPD": "data/spd.pdf",
     }
 
-    # =====================================================
-    # ANSWER FUNCTION
-    # =====================================================
     def answer_query(
         message,
         history,
@@ -139,9 +113,6 @@ def main(force_reindex: bool = False):
 
         query = message.strip()
 
-        # -------------------------------------------------
-        # SOURCE FILTER
-        # -------------------------------------------------
         if source_choice.lower() in [
             "sbc",
             "sbc.pdf"
@@ -162,30 +133,21 @@ def main(force_reindex: bool = False):
 
         try:
 
-            # -------------------------------------------------
-            # RETRIEVAL
-            # -------------------------------------------------
             hits = retriever.search(
                 query,
                 top_k=3,
-                source_filter=source_filter,
+                source_filter=source_filter
             )
 
-            # -------------------------------------------------
-            # NO RESULTS
-            # -------------------------------------------------
             if not hits:
 
                 bot_response = (
-                    " No relevant information found "
+                    "No relevant information found "
                     "in the selected documents."
                 )
 
             else:
 
-                # ---------------------------------------------
-                # SORT RESULTS
-                # ---------------------------------------------
                 context_hits = sorted(
                     hits,
                     key=lambda x: x.score,
@@ -204,19 +166,13 @@ def main(force_reindex: bool = False):
                     "N/A"
                 )
 
-                # ---------------------------------------------
-                # GENERATE ANSWER
-                # ---------------------------------------------
                 answer = generator.generate_answer(
                     query,
                     context_hits
                 )
 
-                # ---------------------------------------------
-                # FINAL RESPONSE
-                # ---------------------------------------------
                 bot_response = f"""
-##  Retrieved Context
+## Retrieved Context
 
 - **Source:** `{os.path.basename(source)}`
 - **Page:** `{page}`
@@ -224,23 +180,17 @@ def main(force_reindex: bool = False):
 
 ---
 
-##  Answer
+## Answer
 
 {answer}
 """
 
-                # ---------------------------------------------
-                # SAVE HISTORY
-                # ---------------------------------------------
                 save_to_history(
                     query=query,
                     source_input=source_choice,
                     answer=answer
                 )
 
-            # -------------------------------------------------
-            # APPEND USER MESSAGE
-            # -------------------------------------------------
             history.append(
                 {
                     "role": "user",
@@ -248,9 +198,6 @@ def main(force_reindex: bool = False):
                 }
             )
 
-            # -------------------------------------------------
-            # APPEND ASSISTANT MESSAGE
-            # -------------------------------------------------
             history.append(
                 {
                     "role": "assistant",
@@ -260,13 +207,10 @@ def main(force_reindex: bool = False):
 
             return history, ""
 
-        # =================================================
-        # ERROR HANDLING
-        # =================================================
         except Exception as e:
 
             error_message = (
-                " Error while generating response:\n\n"
+                "Error while generating response:\n\n"
                 f"{str(e)}"
             )
 
@@ -286,30 +230,16 @@ def main(force_reindex: bool = False):
 
             return history, ""
 
-        # =================================================
-        # CLEANUP
-        # =================================================
         finally:
 
             clear_page_cache()
 
             aggressive_cleanup()
 
-    # =====================================================
-# UI
-# =====================================================
-with gr.Blocks(
-    title="Multimodal RAG Assistant",
-    theme=gr.themes.Soft(
-        primary_hue="blue",
-        secondary_hue="slate",
-        neutral_hue="gray"
-    ),
-    css="""
+    custom_css = """
     .gradio-container {
         max-width: 1600px !important;
         margin: auto !important;
-        padding-top: 0px !important;
         background: #f5f7fb;
     }
 
@@ -387,183 +317,206 @@ with gr.Blocks(
         margin-top: 15px;
         border-radius: 12px !important;
     }
-
-    .examples-table {
-        margin-top: 8px;
-    }
     """
-) as demo:
 
-    # =================================================
-    # HEADER
-    # =================================================
-    gr.HTML(
-        """
-        <div class="main-header">
-            <h1>Multimodal RAG Assistant</h1>
-            <p>
-                Intelligent document question answering over SBC and SPD files
-            </p>
-        </div>
-        """
-    )
+    with gr.Blocks(
+        title="Multimodal RAG Assistant"
+    ) as demo:
 
-    # =================================================
-    # MAIN LAYOUT
-    # =================================================
-    with gr.Row():
+        gr.HTML(
+            """
+            <div class="main-header">
+                <h1>Multimodal RAG Assistant</h1>
+                <p>
+                    Intelligent document question answering
+                    over SBC and SPD files
+                </p>
+            </div>
+            """
+        )
 
-        # =============================================
-        # LEFT SIDEBAR
-        # =============================================
-        with gr.Column(
-            scale=1,
-            elem_classes="sidebar",
-            min_width=320
-        ):
+        with gr.Row():
 
-            gr.HTML(
-                """
-                <div class="sidebar-title">
-                    Document Filter
-                </div>
-                """
-            )
-
-            source_dropdown = gr.Dropdown(
-                choices=list(source_options.keys()),
-                value="Both Documents",
-                show_label=False,
-                info="Restrict retrieval to a specific document"
-            )
-
-            gr.HTML(
-                """
-                <div class="sidebar-title" style="margin-top:30px;">
-                    Example Questions
-                </div>
-                """
-            )
-
-            gr.Examples(
-                examples=[
-                    [
-                        "What is the deductible for the Gold PPO plan?",
-                        "SPD"
-                    ],
-                    [
-                        "What services are covered before deductible?",
-                        "SBC"
-                    ],
-                    [
-                        "Compare SBC and SPD requirements",
-                        "Both Documents"
-                    ],
-                    [
-                        "Does the plan require specialist referrals?",
-                        "Both Documents"
-                    ],
-                    [
-                        "What are the out-of-pocket limits?",
-                        "Both Documents"
-                    ],
-                ],
-                inputs=[
-                    msg,
-                    source_dropdown
-                ],
-                cache_examples=False
-            )
-
-            clear_btn = gr.Button(
-                "Clear Conversation",
-                variant="secondary",
-                elem_classes="clear-btn"
-            )
-
-        # =============================================
-        # CHAT SECTION
-        # =============================================
-        with gr.Column(
-            scale=4,
-            elem_classes="chat-area"
-        ):
-
-            chatbot = gr.Chatbot(
-                label="Conversation",
-                height=760,
-                type="messages",
-                render_markdown=True,
-                show_copy_button=True,
-                bubble_full_width=False,
-                elem_classes="chatbot"
-            )
-
-            with gr.Row(
-                elem_classes="input-container"
+            with gr.Column(
+                scale=1,
+                min_width=320,
+                elem_classes="sidebar"
             ):
 
-                msg = gr.Textbox(
-                    placeholder=(
-                        "Ask a question about the documents..."
-                    ),
+                gr.HTML(
+                    """
+                    <div class="sidebar-title">
+                        Document Filter
+                    </div>
+                    """
+                )
+
+                source_dropdown = gr.Dropdown(
+                    choices=list(source_options.keys()),
+                    value="Both Documents",
                     show_label=False,
-                    lines=2,
-                    max_lines=5,
-                    autofocus=True,
-                    scale=8,
-                    elem_classes="input-box"
+                    info="Restrict retrieval to a specific document"
                 )
 
-                submit_btn = gr.Button(
-                    "Send",
-                    variant="primary",
-                    scale=1,
-                    elem_classes="send-btn"
+                gr.HTML(
+                    """
+                    <div class="sidebar-title"
+                    style="margin-top:30px;">
+                        Example Questions
+                    </div>
+                    """
                 )
 
-    # =====================================================
-    # EVENTS
-    # =====================================================
-    msg.submit(
-        fn=answer_query,
-        inputs=[
-            msg,
-            chatbot,
-            source_dropdown
-        ],
-        outputs=[
-            chatbot,
-            msg
-        ]
-    )
+                clear_btn = gr.Button(
+                    "Clear Conversation",
+                    variant="secondary",
+                    elem_classes="clear-btn"
+                )
 
-    submit_btn.click(
-        fn=answer_query,
-        inputs=[
-            msg,
-            chatbot,
-            source_dropdown
-        ],
-        outputs=[
-            chatbot,
-            msg
-        ]
-    )
+            with gr.Column(
+                scale=4,
+                elem_classes="chat-area"
+            ):
 
-    clear_btn.click(
-        fn=lambda: [],
-        inputs=None,
-        outputs=chatbot,
-        queue=False
-    )
+                chatbot = gr.Chatbot(
+                    label="Conversation",
+                    height=760,
+                    type="messages",
+                    render_markdown=True,
+                    show_copy_button=True,
+                    bubble_full_width=False,
+                    elem_classes="chatbot"
+                )
 
-    # =====================================================
-    # FOOTER
-    # =====================================================
-    gr.Markdown(
-        """
+                with gr.Row(
+                    elem_classes="input-container"
+                ):
+
+                    msg = gr.Textbox(
+                        placeholder=(
+                            "Ask a question about the documents..."
+                        ),
+                        show_label=False,
+                        lines=2,
+                        max_lines=5,
+                        autofocus=True,
+                        scale=8,
+                        elem_classes="input-box"
+                    )
+
+                    submit_btn = gr.Button(
+                        "Send",
+                        variant="primary",
+                        scale=1,
+                        elem_classes="send-btn"
+                    )
+
+                gr.Examples(
+                    examples=[
+                        [
+                            "What is the deductible for the Gold PPO plan?",
+                            "SPD"
+                        ],
+                        [
+                            "What services are covered before deductible?",
+                            "SBC"
+                        ],
+                        [
+                            "Compare SBC and SPD requirements",
+                            "Both Documents"
+                        ],
+                        [
+                            "Does the plan require specialist referrals?",
+                            "Both Documents"
+                        ],
+                        [
+                            "What are the out-of-pocket limits?",
+                            "Both Documents"
+                        ],
+                    ],
+                    inputs=[
+                        msg,
+                        source_dropdown
+                    ],
+                    cache_examples=False
+                )
+
+        msg.submit(
+            fn=answer_query,
+            inputs=[
+                msg,
+                chatbot,
+                source_dropdown
+            ],
+            outputs=[
+                chatbot,
+                msg
+            ]
+        )
+
+        submit_btn.click(
+            fn=answer_query,
+            inputs=[
+                msg,
+                chatbot,
+                source_dropdown
+            ],
+            outputs=[
+                chatbot,
+                msg
+            ]
+        )
+
+        clear_btn.click(
+            fn=lambda: [],
+            inputs=None,
+            outputs=chatbot,
+            queue=False
+        )
+
+        gr.Markdown(
+            """
 ---
 Qdrant • ColQwen2.5 • OpenRouter • Gradio • Multimodal RAG
 """
+        )
+
+    try:
+
+        demo.launch(
+            share=True,
+            server_name="0.0.0.0",
+            server_port=7860,
+            show_error=True,
+            theme=gr.themes.Soft(
+                primary_hue="blue",
+                secondary_hue="slate",
+                neutral_hue="gray"
+            ),
+            css=custom_css
+        )
+
+    finally:
+
+        print(
+            "\nShutting down Qdrant client...\n"
+        )
+
+        try:
+            indexer.local_client.close()
+
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+
+    force_reindex = (
+        "--reindex" in sys.argv
+        or "-r" in sys.argv
     )
+
+    if force_reindex:
+        print("Reindex mode activated\n")
+
+    main(force_reindex=force_reindex)
