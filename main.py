@@ -204,6 +204,212 @@
 #     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
 #     main(force_reindex)
 
+# import sys
+# import gc
+# import os
+# import json
+# from datetime import datetime
+
+# import torch
+# import gradio as gr
+
+# from src.utils import clear_page_cache
+# from src.indexer import MultimodalIndexer
+# from src.retriever import MultimodalRetriever
+# from src.generator import MultimodalGenerator
+
+# HISTORY_FILE = "chat_history.json"
+
+# def save_to_history(query, source_input, answer):
+#     history_data = []
+#     if os.path.exists(HISTORY_FILE):
+#         try:
+#             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+#                 history_data = json.load(f)
+#         except Exception:
+#             history_data = []
+
+#     history_data.append({
+#         "timestamp": datetime.now().isoformat(),
+#         "query": query,
+#         "source": source_input,
+#         "answer": answer,
+#     })
+
+#     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+#         json.dump(history_data, f, indent=2, ensure_ascii=False)
+
+# def aggressive_cleanup():
+#     gc.collect()
+#     if torch.cuda.is_available():
+#         torch.cuda.empty_cache()
+
+# def main(force_reindex=False):
+#     print("\nInitializing Multimodal RAG System...\n")
+
+#     indexer = MultimodalIndexer(force_recreate=force_reindex)
+#     retriever = MultimodalRetriever(indexer)
+#     generator = MultimodalGenerator()
+
+#     print("Warming up retrieval model...")
+#     _ = retriever._extract_text_embedding("warmup query")
+#     print("System Ready!\n")
+
+#     if force_reindex or indexer.is_collection_empty():
+#         print("Indexing documents...\n")
+#         indexer.index_all_data("data")
+#         print("Indexing completed!\n")
+#     else:
+#         print("Existing index found. Skipping indexing.\n")
+
+#     # Mapping for robust source filtering
+#     source_map = {
+#         "Both Documents": None,
+#         "SBC": "data/sbc.pdf",
+#         "SPD": "data/spd.pdf",
+#     }
+
+#     def answer_query(message, history, source_choice):
+#         if history is None:
+#             history = []
+
+#         if not message or not message.strip():
+#             return history, ""
+
+#         query = message.strip()
+#         source_filter = source_map.get(source_choice)
+
+#         try:
+#             hits = retriever.search(
+#                 query,
+#                 top_k=3,
+#                 source_filter=source_filter
+#             )
+
+#             if not hits:
+#                 bot_response = "No relevant information found in selected documents."
+#             else:
+#                 context_hits = sorted(hits, key=lambda x: x.score, reverse=True)
+#                 best_hit = context_hits[0]
+
+#                 source = best_hit.payload.get("source", "Unknown")
+#                 page = best_hit.payload.get("page_number", "N/A")
+
+#                 answer = generator.generate_answer(query, context_hits)
+
+#                 bot_response = f"""### Retrieved Context
+# Source: {os.path.basename(source)}
+# Page: {page}
+# Scope: {source_choice}
+
+# ---
+
+# ### Answer
+# {answer}"""
+
+#                 save_to_history(query, source_choice, answer)
+
+#             history.append({"role": "user", "content": query})
+#             history.append({"role": "assistant", "content": bot_response})
+
+#             return history, ""
+
+#         except Exception as e:
+#             error_message = f"Error while generating response:\n{str(e)}"
+#             history.append({"role": "user", "content": query})
+#             history.append({"role": "assistant", "content": error_message})
+#             return history, ""
+
+#         finally:
+#             clear_page_cache()
+#             aggressive_cleanup()
+
+#     # Custom CSS for professional appearance
+#     custom_css = """
+#     #sidebar {
+#         background-color: #f4f4f9;
+#         border-right: 1px solid #ddd;
+#         padding: 20px;
+#     }
+#     .main-container {
+#         max-width: 1200px;
+#         margin: auto;
+#     }
+#     footer {display: none !important;}
+#     """
+
+#     with gr.Blocks(css=custom_css, title="Multimodal RAG Assistant", theme=gr.themes.Soft()) as demo:
+        
+#         with gr.Row(elem_classes=["main-container"]):
+            
+#             # Left Sidebar
+#             with gr.Column(scale=1, elem_id="sidebar"):
+#                 gr.Markdown("## System Control")
+#                 gr.Markdown("---")
+                
+#                 gr.Markdown("### Document Selection")
+#                 source_dropdown = gr.Dropdown(
+#                     choices=list(source_map.keys()),
+#                     value="Both Documents",
+#                     label="Knowledge Base",
+#                     container=True
+#                 )
+                
+#                 gr.Markdown("### Actions")
+#                 clear_btn = gr.Button("Clear Chat History", variant="secondary")
+                
+#                 gr.Markdown("---")
+#                 gr.Markdown("### System Status")
+#                 gr.Markdown("Status: Ready")
+#                 gr.Markdown("Backend: PyTorch + Qdrant")
+
+#             # Main Chat Column
+#             with gr.Column(scale=4):
+#                 gr.Markdown("# Multimodal RAG Assistant")
+#                 gr.Markdown("Analyze and query document data using vision-language processing.")
+
+#                 chatbot = gr.Chatbot(
+#                     type="messages",
+#                     height=600,
+#                     bubble_full_width=False,
+#                     show_label=False
+#                 )
+
+#                 with gr.Row():
+#                     msg = gr.Textbox(
+#                         placeholder="Enter your question here...",
+#                         scale=9,
+#                         container=False,
+#                         autofocus=True
+#                     )
+#                     submit_btn = gr.Button("Submit", variant="primary", scale=1)
+
+#                 gr.Examples(
+#                     examples=[
+#                         ["What is the deductible for this plan?", "SPD"],
+#                         ["Summarize the coverage details.", "SBC"],
+#                         ["Compare the benefits between these documents.", "Both Documents"],
+#                     ],
+#                     inputs=[msg, source_dropdown],
+#                     label="Sample Queries"
+#                 )
+
+#         # Event listeners
+#         msg.submit(answer_query, [msg, chatbot, source_dropdown], [chatbot, msg])
+#         submit_btn.click(answer_query, [msg, chatbot, source_dropdown], [chatbot, msg])
+#         clear_btn.click(lambda: [], None, chatbot)
+
+#     demo.launch(
+#         share=True,
+#         server_name="0.0.0.0",
+#         server_port=7860,
+#         show_error=True
+#     )
+
+# if __name__ == "__main__":
+#     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
+#     main(force_reindex)
+
 import sys
 import gc
 import os
@@ -219,6 +425,7 @@ from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
 HISTORY_FILE = "chat_history.json"
+
 
 def save_to_history(query, source_input, answer):
     history_data = []
@@ -239,10 +446,12 @@ def save_to_history(query, source_input, answer):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
+
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
 
 def main(force_reindex=False):
     print("\nInitializing Multimodal RAG System...\n")
@@ -262,149 +471,477 @@ def main(force_reindex=False):
     else:
         print("Existing index found. Skipping indexing.\n")
 
-    # Mapping for robust source filtering
     source_map = {
         "Both Documents": None,
         "SBC": "data/sbc.pdf",
         "SPD": "data/spd.pdf",
     }
 
-    def answer_query(message, history, source_choice):
-        if history is None:
-            history = []
-
+    # ── Step 1: Immediately push the user message + thinking bubble ──────────
+    def user_turn(message, history, source_choice):
+        """Append user message and a 'thinking' placeholder instantly."""
         if not message or not message.strip():
-            return history, ""
+            return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
-        query = message.strip()
+        history = history or []
+        history = history + [
+            {"role": "user",      "content": message.strip()},
+            {"role": "assistant", "content": "_⏳ Thinking…_"},
+        ]
+        # Return updated chat + clear textbox + disable controls while processing
+        return history, "", gr.update(interactive=False), gr.update(interactive=False)
+
+    # ── Step 2: Replace the placeholder with the real answer ─────────────────
+    def bot_turn(history, source_choice):
+        """Replace the last 'thinking' message with the actual answer."""
+        if not history:
+            return history, gr.update(interactive=True), gr.update(interactive=True)
+
+        # Extract the user query from second-to-last message
+        query = history[-2]["content"]
         source_filter = source_map.get(source_choice)
 
         try:
-            hits = retriever.search(
-                query,
-                top_k=3,
-                source_filter=source_filter
-            )
+            hits = retriever.search(query, top_k=3, source_filter=source_filter)
 
             if not hits:
-                bot_response = "No relevant information found in selected documents."
+                bot_response = (
+                    "ℹ️ No relevant information found in the selected documents.\n\n"
+                    "Try rephrasing your question or switching the document filter."
+                )
             else:
                 context_hits = sorted(hits, key=lambda x: x.score, reverse=True)
                 best_hit = context_hits[0]
 
                 source = best_hit.payload.get("source", "Unknown")
-                page = best_hit.payload.get("page_number", "N/A")
+                page   = best_hit.payload.get("page_number", "N/A")
 
                 answer = generator.generate_answer(query, context_hits)
 
-                bot_response = f"""### Retrieved Context
-Source: {os.path.basename(source)}
-Page: {page}
-Scope: {source_choice}
-
----
-
-### Answer
-{answer}"""
+                bot_response = (
+                    f"📄 **Source:** `{os.path.basename(source)}`  "
+                    f"**Page:** {page}  "
+                    f"**Scope:** {source_choice}\n\n"
+                    f"---\n\n"
+                    f"{answer}"
+                )
 
                 save_to_history(query, source_choice, answer)
 
-            history.append({"role": "user", "content": query})
-            history.append({"role": "assistant", "content": bot_response})
-
-            return history, ""
-
         except Exception as e:
-            error_message = f"Error while generating response:\n{str(e)}"
-            history.append({"role": "user", "content": query})
-            history.append({"role": "assistant", "content": error_message})
-            return history, ""
+            bot_response = f"⚠️ **Error while generating response:**\n\n```\n{str(e)}\n```"
 
         finally:
             clear_page_cache()
             aggressive_cleanup()
 
-    # Custom CSS for professional appearance
+        # Replace the placeholder
+        history[-1] = {"role": "assistant", "content": bot_response}
+        return history, gr.update(interactive=True), gr.update(interactive=True)
+
+    # ── UI ────────────────────────────────────────────────────────────────────
     custom_css = """
+    /* ---------- Google Fonts ---------- */
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+    * { box-sizing: border-box; }
+
+    body, .gradio-container {
+        font-family: 'DM Sans', sans-serif !important;
+        background: #0f1117 !important;
+        color: #e8eaf0 !important;
+    }
+
+    /* Hide Gradio footer */
+    footer { display: none !important; }
+
+    /* ── App shell ── */
+    .app-shell {
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+        background: #0f1117;
+    }
+
+    /* ── Sidebar ── */
     #sidebar {
-        background-color: #f4f4f9;
-        border-right: 1px solid #ddd;
-        padding: 20px;
+        width: 260px;
+        min-width: 260px;
+        background: #161b27;
+        border-right: 1px solid #2a2f3d;
+        padding: 28px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
     }
-    .main-container {
-        max-width: 1200px;
-        margin: auto;
+
+    #sidebar .sidebar-title {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.3px;
+        color: #c8d0e0;
+        margin: 0 0 4px 0;
     }
-    footer {display: none !important;}
+
+    #sidebar .sidebar-sub {
+        font-size: 12px;
+        color: #5a6178;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 8px;
+    }
+
+    /* ── Source pills ── */
+    .source-pill-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .source-pill {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid #2a2f3d;
+        background: #1e2435;
+        color: #8892aa;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: left;
+    }
+
+    .source-pill:hover,
+    .source-pill.active {
+        background: #2a3250;
+        border-color: #4a6fa5;
+        color: #c8d8f8;
+    }
+
+    /* ── Status badge ── */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        color: #5a9e6f;
+        background: #0d2018;
+        border: 1px solid #1a4030;
+        border-radius: 20px;
+        padding: 5px 12px;
+        width: fit-content;
+    }
+
+    .status-dot {
+        width: 7px;
+        height: 7px;
+        background: #3ecf6c;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.4; }
+    }
+
+    /* ── Main chat area ── */
+    #chat-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* ── Chat header ── */
+    #chat-header {
+        padding: 20px 28px 16px;
+        border-bottom: 1px solid #1e2435;
+        background: #0f1117;
+    }
+
+    #chat-header h1 {
+        font-size: 22px;
+        font-weight: 600;
+        margin: 0;
+        color: #e0e6f0;
+        letter-spacing: -0.4px;
+    }
+
+    #chat-header p {
+        font-size: 13px;
+        color: #4a5268;
+        margin: 4px 0 0;
+    }
+
+    /* ── Chatbot bubbles ── */
+    .chatbot-wrap { flex: 1; overflow-y: auto; padding: 16px 28px; }
+
+    /* Gradio chatbot override */
+    #chatbot {
+        background: transparent !important;
+        border: none !important;
+    }
+
+    #chatbot .message-wrap { gap: 16px !important; }
+
+    #chatbot .user .message {
+        background: #2a3560 !important;
+        border: 1px solid #3a4878 !important;
+        color: #d8e4ff !important;
+        border-radius: 18px 18px 4px 18px !important;
+        font-size: 14px !important;
+        max-width: 72% !important;
+    }
+
+    #chatbot .bot .message {
+        background: #1a1f2e !important;
+        border: 1px solid #252c40 !important;
+        color: #c8d0e0 !important;
+        border-radius: 4px 18px 18px 18px !important;
+        font-size: 14px !important;
+        font-family: 'DM Sans', sans-serif !important;
+        max-width: 84% !important;
+    }
+
+    #chatbot .bot .message code {
+        font-family: 'DM Mono', monospace !important;
+        background: #0d1020 !important;
+        color: #88c0d0 !important;
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    #chatbot .bot .message hr {
+        border-color: #2a3040 !important;
+        margin: 10px 0 !important;
+    }
+
+    /* ── Input row ── */
+    #input-row {
+        padding: 16px 28px 20px;
+        border-top: 1px solid #1e2435;
+        background: #0f1117;
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+    }
+
+    #msg-box textarea {
+        background: #161b27 !important;
+        border: 1px solid #2a2f3d !important;
+        border-radius: 14px !important;
+        color: #e0e6f0 !important;
+        font-family: 'DM Sans', sans-serif !important;
+        font-size: 14px !important;
+        padding: 12px 16px !important;
+        resize: none !important;
+        transition: border-color 0.15s ease;
+    }
+
+    #msg-box textarea:focus {
+        border-color: #4a6fa5 !important;
+        outline: none !important;
+        box-shadow: 0 0 0 3px rgba(74,111,165,0.15) !important;
+    }
+
+    #msg-box textarea::placeholder { color: #3a4258 !important; }
+
+    #send-btn {
+        background: #3a5fb8 !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 12px 22px !important;
+        font-family: 'DM Sans', sans-serif !important;
+        font-size: 14px !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        transition: background 0.15s ease, transform 0.1s ease;
+        height: 46px;
+        white-space: nowrap;
+    }
+
+    #send-btn:hover:not(:disabled)  { background: #4a72d8 !important; }
+    #send-btn:active                 { transform: scale(0.97); }
+    #send-btn:disabled               { background: #1e2638 !important; color: #3a4258 !important; cursor: not-allowed !important; }
+
+    /* ── Dropdown override ── */
+    .gr-dropdown select,
+    select {
+        background: #1a1f2e !important;
+        color: #c8d0e0 !important;
+        border: 1px solid #2a2f3d !important;
+        border-radius: 10px !important;
+        font-size: 13px !important;
+    }
+
+    /* ── Clear button ── */
+    #clear-btn {
+        background: transparent !important;
+        border: 1px solid #2a2f3d !important;
+        color: #5a6178 !important;
+        border-radius: 10px !important;
+        font-size: 13px !important;
+        font-family: 'DM Sans', sans-serif !important;
+        padding: 8px 14px !important;
+        cursor: pointer !important;
+        transition: all 0.15s;
+    }
+
+    #clear-btn:hover {
+        border-color: #c0392b !important;
+        color: #e74c3c !important;
+    }
+
+    /* ── Examples ── */
+    .gr-examples { margin-top: 12px; }
+    .gr-examples button {
+        background: #161b27 !important;
+        border: 1px solid #252c40 !important;
+        color: #7a8aaa !important;
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        padding: 6px 12px !important;
+        font-family: 'DM Mono', monospace !important;
+        transition: all 0.15s;
+    }
+
+    .gr-examples button:hover {
+        border-color: #4a6fa5 !important;
+        color: #a8c0e8 !important;
+    }
     """
 
-    with gr.Blocks(css=custom_css, title="Multimodal RAG Assistant", theme=gr.themes.Soft()) as demo:
-        
-        with gr.Row(elem_classes=["main-container"]):
-            
-            # Left Sidebar
-            with gr.Column(scale=1, elem_id="sidebar"):
-                gr.Markdown("## System Control")
-                gr.Markdown("---")
-                
-                gr.Markdown("### Document Selection")
+    with gr.Blocks(
+        css=custom_css,
+        title="RAG Assistant",
+        theme=gr.themes.Base(
+            primary_hue="blue",
+            neutral_hue="slate",
+        ),
+    ) as demo:
+
+        with gr.Row(elem_classes=["app-shell"]):
+
+            # ── Sidebar ───────────────────────────────────────────
+            with gr.Column(elem_id="sidebar", scale=0, min_width=260):
+                gr.HTML("""
+                    <div class="sidebar-title">RAG Assistant</div>
+                    <div style="font-size:12px;color:#3a4258;margin-top:2px;">
+                        Vision-Language Document QA
+                    </div>
+                """)
+
+                gr.HTML('<div class="sidebar-sub" style="margin-top:8px;">Knowledge Base</div>')
                 source_dropdown = gr.Dropdown(
                     choices=list(source_map.keys()),
                     value="Both Documents",
-                    label="Knowledge Base",
-                    container=True
+                    label="",
+                    container=False,
                 )
-                
-                gr.Markdown("### Actions")
-                clear_btn = gr.Button("Clear Chat History", variant="secondary")
-                
-                gr.Markdown("---")
-                gr.Markdown("### System Status")
-                gr.Markdown("Status: Ready")
-                gr.Markdown("Backend: PyTorch + Qdrant")
 
-            # Main Chat Column
-            with gr.Column(scale=4):
-                gr.Markdown("# Multimodal RAG Assistant")
-                gr.Markdown("Analyze and query document data using vision-language processing.")
+                gr.HTML('<div class="sidebar-sub">Actions</div>')
+                clear_btn = gr.Button("🗑 Clear chat", elem_id="clear-btn", size="sm")
+
+                gr.HTML("""
+                    <div style="margin-top: auto; padding-top: 24px;">
+                        <div class="sidebar-sub">System</div>
+                        <div class="status-badge">
+                            <div class="status-dot"></div>
+                            Ready · PyTorch + Qdrant
+                        </div>
+                    </div>
+                """)
+
+            # ── Chat area ──────────────────────────────────────────
+            with gr.Column(elem_id="chat-area", scale=1):
+
+                gr.HTML("""
+                    <div id="chat-header">
+                        <h1>Multimodal RAG Assistant</h1>
+                        <p>Ask questions about SBC & SPD documents using vision-language retrieval.</p>
+                    </div>
+                """)
 
                 chatbot = gr.Chatbot(
+                    elem_id="chatbot",
                     type="messages",
-                    height=600,
+                    height=560,
                     bubble_full_width=False,
-                    show_label=False
+                    show_label=False,
+                    avatar_images=(None, None),
+                    render_markdown=True,
                 )
 
-                with gr.Row():
+                with gr.Row(elem_id="input-row"):
                     msg = gr.Textbox(
-                        placeholder="Enter your question here...",
+                        placeholder="Ask a question about your documents…",
                         scale=9,
                         container=False,
-                        autofocus=True
+                        lines=1,
+                        max_lines=4,
+                        autofocus=True,
+                        elem_id="msg-box",
                     )
-                    submit_btn = gr.Button("Submit", variant="primary", scale=1)
+                    submit_btn = gr.Button(
+                        "Send ↑",
+                        variant="primary",
+                        scale=0,
+                        min_width=90,
+                        elem_id="send-btn",
+                    )
 
                 gr.Examples(
                     examples=[
                         ["What is the deductible for this plan?", "SPD"],
-                        ["Summarize the coverage details.", "SBC"],
-                        ["Compare the benefits between these documents.", "Both Documents"],
+                        ["What services are covered?", "SBC"],
+                        ["Compare benefits between both documents.", "Both Documents"],
+                        ["What is the out-of-pocket maximum?", "SPD"],
                     ],
                     inputs=[msg, source_dropdown],
-                    label="Sample Queries"
+                    label="Example queries",
                 )
 
-        # Event listeners
-        msg.submit(answer_query, [msg, chatbot, source_dropdown], [chatbot, msg])
-        submit_btn.click(answer_query, [msg, chatbot, source_dropdown], [chatbot, msg])
-        clear_btn.click(lambda: [], None, chatbot)
+        # ── Event wiring (2-step: user_turn → bot_turn) ──────────────────────
+        # On submit, first show the user message immediately, then fetch answer
+        (
+            msg.submit(
+                user_turn,
+                inputs=[msg, chatbot, source_dropdown],
+                outputs=[chatbot, msg, msg, submit_btn],
+                queue=False,
+            ).then(
+                bot_turn,
+                inputs=[chatbot, source_dropdown],
+                outputs=[chatbot, msg, submit_btn],
+            )
+        )
+
+        (
+            submit_btn.click(
+                user_turn,
+                inputs=[msg, chatbot, source_dropdown],
+                outputs=[chatbot, msg, msg, submit_btn],
+                queue=False,
+            ).then(
+                bot_turn,
+                inputs=[chatbot, source_dropdown],
+                outputs=[chatbot, msg, submit_btn],
+            )
+        )
+
+        clear_btn.click(lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
+                        None, [chatbot, msg, submit_btn])
 
     demo.launch(
         share=True,
         server_name="0.0.0.0",
         server_port=7860,
-        show_error=True
+        show_error=True,
     )
+
 
 if __name__ == "__main__":
     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
