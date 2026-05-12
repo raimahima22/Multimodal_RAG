@@ -69,7 +69,7 @@ def aggressive_cleanup():
 # =========================================================
 def main(force_reindex: bool = False):
 
-    print("\n🧠 Initializing Multimodal RAG System...\n")
+    print("\n Initializing Multimodal RAG System...\n")
 
     # -----------------------------------------------------
     # INITIALIZE COMPONENTS
@@ -85,31 +85,31 @@ def main(force_reindex: bool = False):
     # -----------------------------------------------------
     # WARMUP
     # -----------------------------------------------------
-    print("🔥 Warming up retrieval model...")
+    print(" Warming up retrieval model...")
 
     _ = retriever._extract_text_embedding(
         "warmup query"
     )
 
-    print("✅ System Ready!\n")
+    print(" System Ready!\n")
 
     # -----------------------------------------------------
     # INDEXING
     # -----------------------------------------------------
-    print("📚 Checking document index...\n")
+    print(" Checking document index...\n")
 
     if force_reindex or indexer.is_collection_empty():
 
-        print("🔄 Indexing documents...\n")
+        print(" Indexing documents...\n")
 
         indexer.index_all_data("data")
 
-        print("\n✅ Indexing completed!\n")
+        print("\n Indexing completed!\n")
 
     else:
 
         print(
-            "✅ Existing index found. "
+            " Existing index found. "
             "Skipping indexing.\n"
         )
 
@@ -177,7 +177,7 @@ def main(force_reindex: bool = False):
             if not hits:
 
                 bot_response = (
-                    "❌ No relevant information found "
+                    " No relevant information found "
                     "in the selected documents."
                 )
 
@@ -216,7 +216,7 @@ def main(force_reindex: bool = False):
                 # FINAL RESPONSE
                 # ---------------------------------------------
                 bot_response = f"""
-## 📄 Retrieved Context
+##  Retrieved Context
 
 - **Source:** `{os.path.basename(source)}`
 - **Page:** `{page}`
@@ -224,7 +224,7 @@ def main(force_reindex: bool = False):
 
 ---
 
-## 🤖 Answer
+##  Answer
 
 {answer}
 """
@@ -266,7 +266,7 @@ def main(force_reindex: bool = False):
         except Exception as e:
 
             error_message = (
-                "❌ Error while generating response:\n\n"
+                " Error while generating response:\n\n"
                 f"{str(e)}"
             )
 
@@ -296,268 +296,274 @@ def main(force_reindex: bool = False):
             aggressive_cleanup()
 
     # =====================================================
-    # UI
-    # =====================================================
-    with gr.Blocks(
-        title="Multimodal RAG Assistant",
-        theme=gr.themes.Soft(
-            primary_hue="blue",
-            secondary_hue="slate",
-            neutral_hue="gray"
-        ),
-        css="""
-        .gradio-container {
-            max-width: 1500px !important;
-            margin: auto !important;
-            padding-top: 10px !important;
-        }
+# UI
+# =====================================================
+with gr.Blocks(
+    title="Multimodal RAG Assistant",
+    theme=gr.themes.Soft(
+        primary_hue="blue",
+        secondary_hue="slate",
+        neutral_hue="gray"
+    ),
+    css="""
+    .gradio-container {
+        max-width: 1600px !important;
+        margin: auto !important;
+        padding-top: 0px !important;
+        background: #f5f7fb;
+    }
 
-        footer {
-            visibility: hidden;
-        }
+    footer {
+        visibility: hidden;
+    }
 
-        .main-title {
-            text-align: center;
-            margin-bottom: 10px;
-        }
+    .main-header {
+        padding-top: 20px;
+        padding-bottom: 10px;
+        text-align: center;
+    }
 
-        .chatbot {
-            border-radius: 20px !important;
-            border: 1px solid #e5e7eb !important;
-        }
+    .main-header h1 {
+        font-size: 34px;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 5px;
+    }
 
-        .left-panel {
-            border-radius: 20px;
-            padding: 18px;
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-        }
+    .main-header p {
+        font-size: 16px;
+        color: #6b7280;
+    }
 
-        .message-wrap {
-            font-size: 16px !important;
-        }
+    .sidebar {
+        background: white;
+        border-right: 1px solid #e5e7eb;
+        padding: 22px;
+        min-height: 100vh;
+    }
 
-        .bubble-wrap {
-            border-radius: 18px !important;
-        }
+    .sidebar-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: #111827;
+    }
 
-        .examples {
-            margin-top: 10px;
-        }
+    .chat-area {
+        padding: 20px;
+    }
 
-        .input-box textarea {
-            font-size: 16px !important;
-        }
+    .chatbot {
+        border-radius: 18px !important;
+        border: 1px solid #dbe1ea !important;
+        background: white !important;
+    }
+
+    .input-container {
+        margin-top: 12px;
+    }
+
+    .input-box textarea {
+        border-radius: 14px !important;
+        font-size: 16px !important;
+        padding: 14px !important;
+    }
+
+    .message-wrap {
+        font-size: 15px !important;
+    }
+
+    .bubble-wrap {
+        border-radius: 16px !important;
+    }
+
+    .send-btn {
+        height: 52px !important;
+        border-radius: 12px !important;
+        font-weight: 600 !important;
+    }
+
+    .clear-btn {
+        margin-top: 15px;
+        border-radius: 12px !important;
+    }
+
+    .examples-table {
+        margin-top: 8px;
+    }
+    """
+) as demo:
+
+    # =================================================
+    # HEADER
+    # =================================================
+    gr.HTML(
         """
-    ) as demo:
-
-        # -------------------------------------------------
-        # HEADER
-        # -------------------------------------------------
-        gr.HTML(
-            """
-            <div class="main-title">
-                <h1>🧠 Multimodal RAG Assistant</h1>
-                <p>
-                    Intelligent Question Answering
-                    over SBC & SPD Documents
-                </p>
-            </div>
-            """
-        )
-
-        # -------------------------------------------------
-        # MAIN LAYOUT
-        # -------------------------------------------------
-        with gr.Row():
-
-            # =================================================
-            # CHAT AREA
-            # =================================================
-            with gr.Column(scale=5):
-
-                chatbot = gr.Chatbot(
-                    label="Conversation",
-                    height=720,
-                    type="messages",
-                    render_markdown=True,
-                    show_copy_button=True,
-                    bubble_full_width=False,
-                    elem_classes="chatbot"
-                )
-
-                with gr.Row():
-
-                    msg = gr.Textbox(
-                        placeholder=(
-                            "Ask anything about "
-                            "SBC or SPD documents..."
-                        ),
-                        show_label=False,
-                        lines=2,
-                        max_lines=5,
-                        autofocus=True,
-                        elem_classes="input-box",
-                        scale=8
-                    )
-
-                    submit_btn = gr.Button(
-                        "Send",
-                        variant="primary",
-                        scale=1
-                    )
-
-            # =================================================
-            # SIDEBAR
-            # =================================================
-            with gr.Column(
-                scale=1,
-                elem_classes="left-panel"
-            ):
-
-                gr.Markdown(
-                    "## 📄 Document Filter"
-                )
-
-                source_dropdown = gr.Dropdown(
-                    choices=list(source_options.keys()),
-                    value="Both Documents",
-                    label="Search Scope",
-                    info=(
-                        "Restrict search "
-                        "to a specific document"
-                    )
-                )
-
-                gr.Markdown(
-                    "##  Example Questions"
-                )
-
-                gr.Examples(
-                    examples=[
-                        [
-                            "What is the deductible "
-                            "for the Gold PPO plan?",
-                            "SPD"
-                        ],
-                        [
-                            "What services are covered "
-                            "before deductible?",
-                            "SBC"
-                        ],
-                        [
-                            "Compare SBC and SPD "
-                            "requirements",
-                            "Both Documents"
-                        ],
-                        [
-                            "Does the plan require "
-                            "specialist referrals?",
-                            "Both Documents"
-                        ],
-                        
-                    ],
-                    inputs=[
-                        msg,
-                        source_dropdown
-                    ],
-                    cache_examples=False,
-                    # elem_classes="examples"
-                )
-
-                clear_btn = gr.Button(
-                    "🗑️ Clear Conversation",
-                    variant="secondary"
-                )
-
-        # =====================================================
-        # EVENTS
-        # =====================================================
-        msg.submit(
-            fn=answer_query,
-            inputs=[
-                msg,
-                chatbot,
-                source_dropdown
-            ],
-            outputs=[
-                chatbot,
-                msg
-            ]
-        )
-
-        submit_btn.click(
-            fn=answer_query,
-            inputs=[
-                msg,
-                chatbot,
-                source_dropdown
-            ],
-            outputs=[
-                chatbot,
-                msg
-            ]
-        )
-
-        clear_btn.click(
-            fn=lambda: [],
-            inputs=None,
-            outputs=chatbot,
-            queue=False
-        )
-
-        # -------------------------------------------------
-        # FOOTER
-        # -------------------------------------------------
-        gr.Markdown(
-            """
----
-### 🚀 Powered By
-
-- Qdrant
-- ColQwen2.5
-- OpenRouter
-- Gradio
-- Multimodal RAG
-"""
-        )
-
-    # =====================================================
-    # LAUNCH
-    # =====================================================
-    try:
-
-        demo.launch(
-            share=True,
-            server_name="0.0.0.0",
-            server_port=7860,
-            show_error=True
-        )
-
-    finally:
-
-        print(
-            "\n🛑 Shutting down Qdrant client...\n"
-        )
-
-        try:
-            indexer.local_client.close()
-
-        except Exception:
-            pass
-
-
-# =========================================================
-# ENTRYPOINT
-# =========================================================
-if __name__ == "__main__":
-
-    force_reindex = (
-        "--reindex" in sys.argv
-        or "-r" in sys.argv
+        <div class="main-header">
+            <h1>Multimodal RAG Assistant</h1>
+            <p>
+                Intelligent document question answering over SBC and SPD files
+            </p>
+        </div>
+        """
     )
 
-    if force_reindex:
-        print("🔄 Reindex mode activated\n")
+    # =================================================
+    # MAIN LAYOUT
+    # =================================================
+    with gr.Row():
 
-    main(force_reindex=force_reindex)
+        # =============================================
+        # LEFT SIDEBAR
+        # =============================================
+        with gr.Column(
+            scale=1,
+            elem_classes="sidebar",
+            min_width=320
+        ):
+
+            gr.HTML(
+                """
+                <div class="sidebar-title">
+                    Document Filter
+                </div>
+                """
+            )
+
+            source_dropdown = gr.Dropdown(
+                choices=list(source_options.keys()),
+                value="Both Documents",
+                show_label=False,
+                info="Restrict retrieval to a specific document"
+            )
+
+            gr.HTML(
+                """
+                <div class="sidebar-title" style="margin-top:30px;">
+                    Example Questions
+                </div>
+                """
+            )
+
+            gr.Examples(
+                examples=[
+                    [
+                        "What is the deductible for the Gold PPO plan?",
+                        "SPD"
+                    ],
+                    [
+                        "What services are covered before deductible?",
+                        "SBC"
+                    ],
+                    [
+                        "Compare SBC and SPD requirements",
+                        "Both Documents"
+                    ],
+                    [
+                        "Does the plan require specialist referrals?",
+                        "Both Documents"
+                    ],
+                    [
+                        "What are the out-of-pocket limits?",
+                        "Both Documents"
+                    ],
+                ],
+                inputs=[
+                    msg,
+                    source_dropdown
+                ],
+                cache_examples=False
+            )
+
+            clear_btn = gr.Button(
+                "Clear Conversation",
+                variant="secondary",
+                elem_classes="clear-btn"
+            )
+
+        # =============================================
+        # CHAT SECTION
+        # =============================================
+        with gr.Column(
+            scale=4,
+            elem_classes="chat-area"
+        ):
+
+            chatbot = gr.Chatbot(
+                label="Conversation",
+                height=760,
+                type="messages",
+                render_markdown=True,
+                show_copy_button=True,
+                bubble_full_width=False,
+                elem_classes="chatbot"
+            )
+
+            with gr.Row(
+                elem_classes="input-container"
+            ):
+
+                msg = gr.Textbox(
+                    placeholder=(
+                        "Ask a question about the documents..."
+                    ),
+                    show_label=False,
+                    lines=2,
+                    max_lines=5,
+                    autofocus=True,
+                    scale=8,
+                    elem_classes="input-box"
+                )
+
+                submit_btn = gr.Button(
+                    "Send",
+                    variant="primary",
+                    scale=1,
+                    elem_classes="send-btn"
+                )
+
+    # =====================================================
+    # EVENTS
+    # =====================================================
+    msg.submit(
+        fn=answer_query,
+        inputs=[
+            msg,
+            chatbot,
+            source_dropdown
+        ],
+        outputs=[
+            chatbot,
+            msg
+        ]
+    )
+
+    submit_btn.click(
+        fn=answer_query,
+        inputs=[
+            msg,
+            chatbot,
+            source_dropdown
+        ],
+        outputs=[
+            chatbot,
+            msg
+        ]
+    )
+
+    clear_btn.click(
+        fn=lambda: [],
+        inputs=None,
+        outputs=chatbot,
+        queue=False
+    )
+
+    # =====================================================
+    # FOOTER
+    # =====================================================
+    gr.Markdown(
+        """
+---
+Qdrant • ColQwen2.5 • OpenRouter • Gradio • Multimodal RAG
+"""
+    )
