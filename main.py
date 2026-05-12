@@ -126,19 +126,93 @@ Answer:
 
     # GRADIO UI
   
-    iface = gr.Interface(
-        fn=answer_query,
-        inputs=[
-            gr.Textbox(label="Query", placeholder="Ask your question..."),
-            gr.Textbox(label="Source (optional: sbc / spd)", placeholder="e.g. sbc")
-        ],
-        outputs=gr.Textbox(label="Response", lines=15, max_lines=25),
-        title="Multimodal RAG System",
-        description="Ask questions with optional source filtering (sbc / spd)"
-    )
-    try:
+    # iface = gr.Interface(
+    #     fn=answer_query,
+    #     inputs=[
+    #         gr.Textbox(label="Query", placeholder="Ask your question..."),
+    #         gr.Textbox(label="Source (optional: sbc / spd)", placeholder="e.g. sbc")
+    #     ],
+    #     outputs=gr.Textbox(label="Response", lines=15, max_lines=25),
+    #     title="Multimodal RAG System",
+    #     description="Ask questions with optional source filtering (sbc / spd)"
+    # )
+    # try:
 
-        iface.launch(share=True)
+    #     iface.launch(share=True)
+    # finally:
+    #     print("Shutting down Qdrant client...")
+    #     try:
+    #         indexer.local_client.close()
+    #     except Exception:
+    #         pass
+    with gr.Blocks(title="Multimodal RAG Chat", theme=gr.themes.Soft()) as demo:
+        gr.Markdown("# Multimodal RAG Chatbot")
+        gr.Markdown("Ask questions about **SBC** and **SPD** documents with optional source filtering.")
+
+        with gr.Row():
+            with gr.Column(scale=4):
+                chatbot = gr.Chatbot(
+                    height=600,
+                    show_copy_button=True,
+                    avatar_images=["🧑‍💻", "🤖"],
+                    bubble_full_width=False,
+                )
+                
+                msg = gr.Textbox(
+                    placeholder="Type your question here...",
+                    label="Message",
+                    scale=7
+                )
+
+            with gr.Column(scale=1):
+                gr.Markdown("### Filters")
+                source_dropdown = gr.Dropdown(
+                    choices=list(source_options.keys()),
+                    value="Both Documents",
+                    label="Search in",
+                    info="Limit search to a specific document"
+                )
+
+                clear_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
+                examples = gr.Examples(
+                    examples=[
+                        ["What is the main objective of the SBC?", "SBC"],
+                        ["Summarize the key points of SPD", "SPD"],
+                        ["Compare SBC and SPD requirements", "Both Documents"],
+                    ],
+                    inputs=[msg, source_dropdown],
+                    label="Examples"
+                )
+
+        # Submit handlers
+        def user_message(message, history):
+            if not message:
+                return "", history
+            history.append((message, None))
+            return "", history
+
+        msg.submit(
+            user_message,
+            [msg, chatbot],
+            [msg, chatbot]
+        ).then(
+            answer_query,
+            [msg, chatbot, source_dropdown],
+            [chatbot, msg]
+        )
+
+        clear_btn.click(lambda: [], None, chatbot, queue=False)
+
+        # Footer
+        gr.Markdown("---\nBuilt with Qdrant + Multimodal RAG")
+
+    try:
+        demo.launch(
+            share=True,
+            server_name="0.0.0.0",
+            server_port=7860,
+            show_error=True
+        )
     finally:
         print("Shutting down Qdrant client...")
         try:
