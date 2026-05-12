@@ -3,14 +3,16 @@ import gc
 import torch
 import gradio as gr
 from datetime import datetime
-from src.utils import clear_page_cache
 import os
 import json
+
+from src.utils import clear_page_cache
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
 HISTORY_FILE = "chat_history.json"
+
 
 def save_to_history(query, source_input, answer):
     history = []
@@ -28,6 +30,7 @@ def save_to_history(query, source_input, answer):
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
 
+
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
@@ -37,54 +40,46 @@ def aggressive_cleanup():
 def main(force_reindex: bool = False):
     print("Initializing Multimodal RAG System...\n")
 
-    #initialize components
     indexer = MultimodalIndexer(force_recreate=force_reindex)
     retriever = MultimodalRetriever(indexer)
     generator = MultimodalGenerator()
 
     print("Warming up model...")
     _ = retriever._extract_text_embedding("warmup query")
-    print("Ready!")
+    print("✅ Ready!")
 
-    # INDEXING
+    # Indexing Phase
     print("--- Phase 1: Checking Index ---")
-
-    if force_reindex:
-        print("Force reindexing...")
-        indexer.index_all_data("data")
-    elif indexer.is_collection_empty():
-        print("Collection is empty → indexing...")
+    if force_reindex or indexer.is_collection_empty():
+        print("Indexing documents...")
         indexer.index_all_data("data")
     else:
-        print("Collection already has data. Skipping indexing.\n")
+        print("✅ Index already exists. Skipping indexing.")
 
     print("System is ready!\n")
-    # Source options (kept simple like your original)
+
+    # Source Options
     source_options = {
         "Both Documents": None,
         "SBC": "data/sbc.pdf",
         "SPD": "data/spd.pdf"
     }
 
-    # ====================== MAIN CHAT FUNCTION ======================
+    # ====================== CHAT FUNCTION ======================
     def answer_query(message: str, history: list, source_choice: str):
-        """This function is called after user message is added to history"""
         if not message or not message.strip():
             return history, ""
 
         query = message.strip()
-        # Convert dropdown choice to your original filter logic
-        source_input = source_choice.lower() if source_choice != "Both Documents" else ""
+        source_input = source_choice if source_choice != "Both Documents" else ""
 
-        if source_input in ["sbc", "sbc.pdf"]:
+        # Source filter logic (same as your original)
+        if source_input.lower() in ["sbc", "sbc.pdf"]:
             source_filter = "data/sbc.pdf"
-        elif source_input in ["spd", "spd.pdf"]:
+        elif source_input.lower() in ["spd", "spd.pdf"]:
             source_filter = "data/spd.pdf"
         else:
             source_filter = None
-
-        print(f"\nSearching for: {query}")
-        print(f"Searching in: {'Both documents' if source_filter is None else source_filter}")
 
         try:
             hits = retriever.search(query, top_k=3, source_filter=source_filter)
@@ -98,9 +93,6 @@ def main(force_reindex: bool = False):
                 source = best_hit.payload.get('source', 'Unknown')
                 page = best_hit.payload.get('page_number', 'N/A')
 
-                print(f"Found match: {source} (Page {page})")
-                print("Generating answer...")
-
                 answer = generator.generate_answer(query, context_hits)
 
                 response = f"""**Source**: {source} (Page {page})
@@ -110,63 +102,96 @@ def main(force_reindex: bool = False):
 
                 save_to_history(query, source_choice, answer)
 
-            # Append assistant response
+            # Append bot response
             history.append((query, response))
             return history, ""
 
         except Exception as e:
-            print(f"Error during query: {e}")
-            error_response = f"An error occurred: {str(e)}"
-            history.append((query, error_response))
+            error_msg = f"An error occurred: {str(e)}"
+            history.append((query, error_msg))
             return history, ""
         finally:
             clear_page_cache()
             aggressive_cleanup()
 
-    # ====================== GRADIO UI ======================
-    with gr.Blocks(title="Multimodal RAG Chat", theme=gr.themes.Soft()) as demo:
+    # ====================== BEAUTIFUL GRADIO UI ======================
+    with gr.Blocks(
+        title="Multimodal RAG Chat",
+        theme=gr.themes.Soft(primary_hue="blue", secondary_hue="indigo")
+    ) as demo:
+        
         gr.Markdown("# 🧠 Multimodal RAG Chatbot")
-        gr.Markdown("Ask questions about SBC and SPD documents")
+        gr.Markdown("**Intelligent Q&A** over SBC & SPD documents with source filtering.")
 
         with gr.Row():
-            with gr.Column(scale=4):
+            with gr.Column(scale=5):
                 chatbot = gr.Chatbot(
-                    height=650,
+                    height=680,
                     type="tuples",
                     show_copy_button=True,
-                    allow_tags=False
-                )
-                msg = gr.Textbox(
-                    placeholder="Type your question here and press Enter...",
-                    label="Your Question",
-                    scale=7
+                    show_share_button=False,
+                    allow_tags=False,
+                    avatar_images=["👤", "🤖"],
+                    bubble_full_width=False,
                 )
 
+                with gr.Row():
+                    msg = gr.Textbox(
+                        placeholder="Ask your question here... (Press Enter to send)",
+                        label=None,
+                        scale=8,
+                        container=False
+                    )
+                    submit_btn = gr.Button("Send", variant="primary", scale=1)
+
             with gr.Column(scale=1):
-                gr.Markdown("**Document Filter**")
+                gr.Markdown("### 📄 Document Filter")
                 source_dropdown = gr.Dropdown(
                     choices=list(source_options.keys()),
                     value="Both Documents",
-                    label="Search in",
-                    info="sbc / spd / both"
+                    label="Search Scope",
+                    info="Limit search to one document"
                 )
+
+                gr.Markdown("### Quick Examples")
+                gr.Examples(
+                    examples=[
+                        ["What is the main objective of SBC?", "SBC"],
+                        ["What amount is required for Embedded deductible for Gold PPO plan?", "SPD"],
+                        ["Compare SBC and SPD requirements", "Both Documents"],
+                    ],
+                    inputs=[msg, source_dropdown],
+                    cache_examples=False
+                )
+
                 clear_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
 
-        # ====================== EVENT HANDLING ======================
-        def add_user_message(message, history):
+        # ====================== EVENT LOGIC (Fixed) ======================
+        def user_submit(message, history):
             if not message:
                 return "", history
-            history = history + [(message, None)]   # None = waiting for bot response
+            # Add user message with placeholder for bot reply
+            history = history + [(message, None)]
             return "", history
 
-        # Submit flow
-        msg.submit(
-            fn=add_user_message,
+        # Submit using button or Enter key
+        submit_event = msg.submit(
+            fn=user_submit,
             inputs=[msg, chatbot],
             outputs=[msg, chatbot]
         ).then(
             fn=answer_query,
-            inputs=[msg, chatbot, source_dropdown],   # Note: msg is already cleared, but we use the one from previous step
+            inputs=[msg, chatbot, source_dropdown],  # msg is already cleared
+            outputs=[chatbot, msg]
+        )
+
+        submit_btn.click(
+            fn=user_submit,
+            inputs=[msg, chatbot],
+            outputs=[msg, chatbot]
+        ).then(
+            fn=answer_query,
+            inputs=[msg, chatbot, source_dropdown],
             outputs=[chatbot, msg]
         )
 
@@ -177,118 +202,25 @@ def main(force_reindex: bool = False):
             queue=False
         )
 
-        gr.Markdown("---\nBuilt with Qdrant + Multimodal RAG")
+        gr.Markdown("---\nBuilt with ❤️ using Qdrant • Gradio • Multimodal RAG")
 
     try:
-        demo.launch(share=True, server_name="0.0.0.0", server_port=7860)
+        demo.launch(
+            share=True,
+            server_name="0.0.0.0",
+            server_port=7860,
+            show_error=True
+        )
     finally:
         print("Shutting down Qdrant client...")
         try:
             indexer.local_client.close()
-        except Exception:
+        except:
             pass
 
 
 if __name__ == "__main__":
     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
     if force_reindex:
-        print("🔄 Reindex mode activated\n")
-    main(force_reindex=force_reindex)
-
-    
-#     # SOURCE MAP
-   
-#     source_map = {
-#         "sbc": "data/sbc.pdf",
-#         "spd": "data/spd.pdf"
-#     }
-
-  
-#     # GRADIO FUNCTION
-  
-#     def answer_query(query, source_input):
-
-#         query = query.strip()
-#         source_input = source_input.strip().lower()
-
-#         if not query:
-#             return "Please enter a question."
-
-#         # === SOURCE FILTER LOGIC (kept exactly as you wanted) ===
-#         if source_input in ["sbc", "sbc.pdf"]:
-#             source_filter = "data/sbc.pdf"
-#         elif source_input in ["spd", "spd.pdf"]:
-#             source_filter = "data/spd.pdf"
-#         else:
-#             source_filter = None
-
-#         print(f"\nSearching for: {query}")
-#         print(f"Searching in: {'Both documents' if source_filter is None else source_filter}")
-
-
-#         try:
-#             hits = retriever.search(query, top_k=3, source_filter=source_filter)
-
-#             if not hits:
-#                 return "No relevant documents found."
-
-#             # context_hits = hits
-#             context_hits = sorted(hits, key=lambda x: x.score, reverse=True)
-#             best_hit = context_hits[0]
-
-#             source = best_hit.payload.get('source', 'Unknown')
-#             page = best_hit.payload.get('page_number', 'N/A')
-
-#             print(f"Found match: {source} (Page {page})")
-#             print("Generating answer...")
-
-#             answer = generator.generate_answer(query, context_hits)
-#             save_to_history(query, source_input, answer)
-
-#             return f"""
-# Source: {source} (Page {page})
-# Filter: {"Both documents" if source_filter is None else source_filter}
-
-# Answer:
-# {answer}
-# """
-#         except Exception as e:
-#             print(f"Error during query: {e}")
-#             return f"An error occurred: {str(e)}"
-#         finally:
-#             clear_page_cache()
-#             aggressive_cleanup()
-
-#     # GRADIO UI
-  
-#     iface = gr.Interface(
-#         fn=answer_query,
-#         inputs=[
-#             gr.Textbox(label="Query", placeholder="Ask your question..."),
-#             gr.Textbox(label="Source (optional: sbc / spd)", placeholder="e.g. sbc")
-#         ],
-#         outputs=gr.Textbox(label="Response", lines=15, max_lines=25),
-#         title="Multimodal RAG System",
-#         description="Ask questions with optional source filtering (sbc / spd)"
-#     )
-#     try:
-
-#         iface.launch(share=True)
-#     finally:
-#         print("Shutting down Qdrant client...")
-#         try:
-#             indexer.local_client.close()
-#         except Exception:
-#             pass
-
-
-
-# ENTRY POINT
-
-if __name__ == "__main__":
-    force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-
-    if force_reindex:
-        print("Reindex mode activated\n")
-
+        print(" Reindex mode activated\n")
     main(force_reindex=force_reindex)
