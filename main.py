@@ -166,7 +166,7 @@ def main(force_reindex: bool = False):
             # RETRIEVAL
             # -------------------------------------------------
             hits = retriever.search(
-                query=query,
+                query,
                 top_k=3,
                 source_filter=source_filter,
             )
