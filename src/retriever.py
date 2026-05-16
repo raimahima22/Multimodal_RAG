@@ -8,37 +8,83 @@ from qdrant_client.models import Filter, FieldCondition, MatchText
 
 VERBOSE = True
 
-# ================= STOPWORDS =================
+#stopwords defined
 STOPWORDS = {
     "what", "is", "are", "the", "a", "an",
     "in", "on", "at", "to", "of",
     "and", "or"
 }
 
-# ================= UTILS =================
+# utility functions
 
 def aggressive_cleanup():
+    """
+    Aggressively clear Python and CUDA memory.
+
+    Useful after embedding generation or retrieval operations to
+    reduce GPU memory usage and avoid out-of-memory errors.
+    """
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 def to_numpy(x):
+    """
+    Convert tensor or array-like object to NumPy array.
+
+    Args:
+        x:
+            Torch tensor or NumPy-compatible object.
+
+    Returns:
+        np.ndarray
+    """
     if isinstance(x, torch.Tensor):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
 def tokenize(text: str):
+    """
+    Tokenize and normalize text.
+
+    Processing steps:
+    -----------------
+    1. Lowercase conversion
+    2. Extract alphanumeric tokens
+    3. Remove stopwords
+
+    Args:
+        text (str)
+
+    Returns:
+        List[str]
+    """
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in STOPWORDS]
 
 def normalize_query(text: str):
+    """
+    Normalize query into a clean tokenized string.
+
+    Args:
+        text (str)
+
+    Returns:
+        str
+    """
     return " ".join(tokenize(text))
 
 def extract_numbers(text: str):
+    """
+    Extract numeric patterns from text.
+    """
     return set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text))
 
 
 def minmax(x):
+    """
+    Perform min-max normalization
+    """
     if not x:
         return x
     mn, mx = min(x), max(x)
@@ -49,16 +95,41 @@ def minmax(x):
 
 
 class BM25:
+    """
+    Lightweight BM25 retriever for OCR text reranking.
+
+    BM25 is a probabilistic ranking algorithm widely used in
+    information retrieval systems.
+
+    Used here to rerank OCR text after vector retrieval.
+    """
     def __init__(self, k1=1.5, b=0.75):
+        """
+        Initialize BM25 parameters.
+
+        Args:
+            k1 (float):
+                Controls term frequency scaling.
+
+            b (float):
+                Controls document length normalization.
+        """
         self.k1 = k1
         self.b = b
 
     def fit(self, corpus):
-        self.tokenized = [tokenize(doc) for doc in corpus]
-        self.doc_lens = [len(d) for d in self.tokenized]
+        """
+        Build BM25 statistics from corpus.
+
+        Args:
+            corpus (List[str]):
+                OCR texts from candidate patches/pages.
+        """
+        self.tokenized = [tokenize(doc) for doc in corpus] # tokenize corpus
+        self.doc_lens = [len(d) for d in self.tokenized] #document lengths
         self.avgdl = sum(self.doc_lens) / max(1, len(self.tokenized))
 
-        df = defaultdict(int)
+        df = defaultdict(int) #document frequencies
         self.freqs = []
 
         for doc in self.tokenized:
@@ -68,13 +139,25 @@ class BM25:
             self.freqs.append(freq)
             for t in set(doc):
                 df[t] += 1
-
+        
+        #IDF computation
         self.idf = {
             t: math.log((len(self.tokenized) - n + 0.5) / (n + 0.5) + 1)
             for t, n in df.items()
         }
 
     def score(self, query_tokens, i):
+        """
+        Compute BM25 score for a document.
+
+        Args:
+            query_tokens (List[str])
+            i (int):
+                Document index
+
+        Returns:
+            float
+        """
         freq = self.freqs[i]
         dl = self.doc_lens[i]
         score = 0.0
@@ -93,11 +176,44 @@ class BM25:
 
 
 class MultimodalRetriever:
+    """
+    Hybrid multimodal retriever using:
+
+    1. ColQwen2.5 embeddings
+    2. Qdrant vector search
+    3. OCR-based BM25 reranking
+    4. Keyword matching
+    5. Phrase matching
+    6. Numeric matching
+
+    Retrieval Pipeline:
+    -------------------
+    Query
+      ↓
+    Text Embedding
+      ↓
+    Qdrant Multi-vector Search
+      ↓
+    OCR-based Hybrid Reranking
+      ↓
+    Page Aggregation
+      ↓
+    Final Top Pages
+    """
     def __init__(self, indexer):
         self.indexer = indexer
 
     # embedding 
     def _extract_text_embedding(self, query_text):
+        """
+        Generate query embeddings using ColQwen2.5.
+
+        Args:
+            query_text (str)
+
+        Returns:
+            np.ndarray
+        """
         inputs = self.indexer.processor.process_queries([query_text]).to(self.indexer.device)
 
         with torch.no_grad():
@@ -118,6 +234,32 @@ class MultimodalRetriever:
     # search function
 
     def search(self, query_text, top_k=3, source_filter=None):
+        """
+        Perform hybrid multimodal retrieval.
+
+        Pipeline:
+        ---------
+        1. Normalize query
+        2. Generate query embeddings
+        3. Retrieve candidates from Qdrant
+        4. OCR-based reranking
+        5. Aggregate page results
+        6. Return top pages
+
+        Args:
+            query_text (str):
+                User query.
+
+            top_k (int):
+                Number of final pages to return.
+
+            source_filter (str | None):
+                Restrict retrieval to a specific source file.
+
+        Returns:
+            List[ScoredPoint]
+        """
+
 
         print("\nQUERY:", query_text)
 
@@ -173,7 +315,7 @@ class MultimodalRetriever:
         bm25 = BM25()
         bm25.fit(ocr_texts)
 
-        # bm25_scores = []
+        # additional scoring signals
         bm25_scores = [bm25.score(q_tokens, i) for i in range(len(hits))]
         emb_scores = [h.score for h in hits]
         kw_scores = []
@@ -201,14 +343,14 @@ class MultimodalRetriever:
 
         # emb_scores = [h.score for h in hits]
 
-        # normalize 0–1
+        # normalize the scores
         emb_n = minmax(emb_scores)
         bm_n = minmax(bm25_scores)
         kw_n = minmax(kw_scores)
         ph_n = minmax(phrase_scores)
         nm_n = minmax(num_scores)
 
-        # final score
+        # final weighted score
         final_scores = []
         for i in range(len(hits)):
             score = (
@@ -228,6 +370,8 @@ class MultimodalRetriever:
             print(f"{i}. Page {h.payload['page_number']} | Score={score:.5f}")
 
         #page aggregation
+        # Multiple patches may belong to the same page.
+        # Keep only the highest-scoring patch per page.
 
         page_best = {}
 
@@ -241,7 +385,7 @@ class MultimodalRetriever:
                     "hit": h
                 }
 
-        final_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True)
+        final_pages = sorted(page_best.values(), key=lambda x: x["score"], reverse=True) #sort pages by score
 
         
 
@@ -253,4 +397,5 @@ class MultimodalRetriever:
 
         aggressive_cleanup()
 
+        #return only hits
         return [p["hit"] for p in final_pages[:top_k]]

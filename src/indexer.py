@@ -2,7 +2,7 @@ import transformers.integrations.peft as _ti
 
 _original_convert = _ti._convert_peft_config_moe
 
-def _patched_convert_peft_config_moe(peft_config, model_type):
+def _patched_convert_peft_config_moe(peft_config, model_type): #safely bypass MoE PEFT conversion for unsupported model types.
     mapping = getattr(_ti, '_MOE_TARGET_MODULE_MAPPING', {})
     if model_type not in mapping:
         return peft_config  # not a known MoE model — skip conversion entirely
@@ -35,28 +35,86 @@ from transformers import AutoProcessor
 
 
 def aggressive_cleanup():
+    """
+    clear Python and CUDA memory.
+    Useful to avoid GPU OOM issues.
+    """
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 def to_numpy(x):
+    """
+    Convert tensors to NumPy arrays.
+
+    Args:
+        x: Tensor or array-like object.
+
+    Returns:
+        np.ndarray
+    """
     if isinstance(x, torch.Tensor):
         return x.detach().to(torch.float32).cpu().numpy()
     return np.asarray(x, dtype=np.float32)
 
 
 def l2_normalize(x):
+    """
+    Perform row-wise L2 normalization.
+
+    Args:
+        x (np.ndarray): Shape [N, D]
+
+    Returns:
+        np.ndarray: Normalized vectors
+    """
     norms = np.linalg.norm(x, axis=1, keepdims=True)
     return x / np.clip(norms, 1e-8, None)
 
 
 class MultimodalIndexer:
+    """
+    Multimodal document indexer using ColQwen2.5 + Qdrant.
+
+    Features:
+    ---------
+    - PDF/image ingestion
+    - Sliding-window patch extraction
+    - OCR extraction (page + patch level)
+    - Multi-vector embeddings using ColQwen2.5
+    - Qdrant vector storage with MAX_SIM retrieval
+
+    Workflow:
+    ---------
+    PDF/Image
+        ↓
+    Sliding patches
+        ↓
+    OCR extraction
+        ↓
+    ColQwen2.5 embeddings
+        ↓
+    Qdrant multi-vector indexing
+    """
     def __init__(self, collection_name="mrag_collection", force_recreate=False):
+        """
+        Initialize the indexer.
+
+        Args:
+            collection_name (str):
+                Name of Qdrant collection.
+
+            force_recreate (bool):
+                If True, recreate the collection from scratch.
+        """
+        #device setup
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
+        #model configuration
         self.collection_name = collection_name
         self.model_name = "vidore/colqwen2.5-v0.2"
-
+        
+        #sliding window patch configuration
         self.chunk_size = 512
         self.overlap = 160
         self.stride = self.chunk_size - self.overlap
@@ -65,7 +123,7 @@ class MultimodalIndexer:
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
         
-
+        #load processor and model
         self.model = ColQwen2_5.from_pretrained(
             self.model_name,
             torch_dtype=self.torch_dtype,
@@ -75,7 +133,8 @@ class MultimodalIndexer:
             attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
     
         ).eval()
-
+        
+        #initialize Qdrant
         self.processor = ColQwen2_5_Processor.from_pretrained(
             self.model_name,
             trust_remote_code=True
@@ -92,6 +151,11 @@ class MultimodalIndexer:
 
 
     def _setup_collection(self):
+        """
+        Create Qdrant collection if it does not already exist.
+
+        Uses dynamic embedding dimension detection from the model.
+        """
         if self.local_client.collection_exists(self.collection_name):
             print(f" Using existing collection: {self.collection_name}")
             print(self.local_client.get_collection(self.collection_name))
@@ -106,7 +170,8 @@ class MultimodalIndexer:
             embed_dim = outputs.image_embeds.shape[-1] if hasattr(outputs, "image_embeds") else 128
 
         print(f"Embedding dim: {embed_dim}")
-
+        
+        #configure multi-vector collection
         vectors_config = {
             "image": VectorParams(
                 size=embed_dim,
@@ -124,6 +189,12 @@ class MultimodalIndexer:
         print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
     def is_collection_empty(self) -> bool:
+        """
+        Check whether collection exists and contains data.
+
+        Returns:
+            bool
+        """
         if not self.local_client.collection_exists(self.collection_name):
             return True
         try:
@@ -140,6 +211,16 @@ class MultimodalIndexer:
             return True
 
     def _extract_image_embeddings(self, pil_img: Image.Image) -> np.ndarray:
+        """
+        Generate ColQwen2.5 multi-vector embeddings.
+
+        Args:
+            pil_img (PIL.Image)
+
+        Returns:
+            np.ndarray:
+                Shape [num_tokens, embedding_dim]
+        """
         start = time.time()
         pil_img = pil_img.convert("RGB")
     
@@ -165,6 +246,15 @@ class MultimodalIndexer:
         return embeddings
 
     def _extract_ocr_text(self, pil_img: Image.Image) -> str:
+        """
+        Extract OCR text using Tesseract.
+
+        Args:
+            pil_img (PIL.Image)
+
+        Returns:
+            str
+        """
         try:
             text = pytesseract.image_to_string(pil_img)
             return text.strip()
@@ -172,74 +262,40 @@ class MultimodalIndexer:
             print(f"OCR failed: {e}")
             return ""
 
-    # def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
-    #     start_page = time.time()
-    #     extracted_text = self._extract_ocr_text(pil_img)
-
-    #     w, h = pil_img.size
-    #     points = []
-
-    #     y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
-    #     if y_coords and y_coords[-1] + self.chunk_size < h:
-    #         y_coords.append(h - self.chunk_size)
-
-    #     x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
-    #     if x_coords and x_coords[-1] + self.chunk_size < w:
-    #         x_coords.append(w - self.chunk_size)
-
-    #     y_coords = sorted(set(y_coords))
-    #     x_coords = sorted(set(x_coords))
-
-    #     for y in y_coords:
-    #         for x in x_coords:
-    #             patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
-    #             multi_vector = self._extract_image_embeddings(patch)
-
-    #             point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
-
-    #             points.append(
-    #                 PointStruct(
-    #                     id=point_id,
-    #                     vector={"image": multi_vector.tolist()},
-    #                     payload={
-    #                         "page_number": page_num,
-    #                         "source": str(source),
-    #                         "x": x,
-    #                         "y": y,
-    #                         "chunk_size": self.chunk_size,
-    #                         "num_tokens": int(multi_vector.shape[0]),
-    #                         "ocr_text": extracted_text 
-    #                     }
-    #                 )
-    #             )
-
-    #     if points:
-    #         self.local_client.upsert(
-    #             collection_name=self.collection_name,
-    #             points=points,
-    #             wait=True
-    #         )
-
-    #     page_time = time.time() - start_page
-    #     print(f"Page {page_num} completed: {page_time:.2f}s ")
-    #     aggressive_cleanup()
-    #     return page_time
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
+        """
+        Process a page/image and store embeddings in Qdrant.
+
+        Steps:
+        ------
+        1. Perform page-level OCR
+        2. Create overlapping image patches
+        3. Extract patch-level OCR
+        4. Generate ColQwen embeddings
+        5. Store vectors + metadata in Qdrant
+
+        Args:
+            pil_img (PIL.Image)
+            source (str): File path/source name
+            page_num (int): Page index
+        """
         start_page = time.time()
     
-        # Page-level OCR (once)
+        # Page-level OCR 
         page_ocr = self._extract_ocr_text(pil_img).strip()
     
         w, h = pil_img.size
         points = []
-
+        
+        #sliding window coordinates
         y_coords = list(range(0, max(1, h - self.chunk_size + 1), self.stride))
         if y_coords and y_coords[-1] + self.chunk_size < h:
             y_coords.append(h - self.chunk_size)
         x_coords = list(range(0, max(1, w - self.chunk_size + 1), self.stride))
         if x_coords and x_coords[-1] + self.chunk_size < w:
             x_coords.append(w - self.chunk_size)
-
+        
+        #process each patch
         for y in y_coords:
             for x in x_coords:
                 patch = pil_img.crop((x, y, x + self.chunk_size, y + self.chunk_size))
@@ -254,7 +310,8 @@ class MultimodalIndexer:
                 multi_vector = self._extract_image_embeddings(patch)
 
                 point_id = abs(hash(f"{source}_{page_num}_{x}_{y}")) % (10**15)
-
+                
+                #create qdrant point
                 points.append(
                    PointStruct(
                        id=point_id,
@@ -272,7 +329,8 @@ class MultimodalIndexer:
                         }
                     )
                 )   
-
+        
+        #upload to qdrant
         if points:
             self.local_client.upsert(
                 collection_name=self.collection_name,
@@ -286,6 +344,16 @@ class MultimodalIndexer:
 
 
     def index_document(self, pdf_path: str):
+        """
+        Index an entire PDF document.
+
+        Args:
+            pdf_path (str)
+
+        Returns:
+            float: Total indexing time
+        """
+
         start_doc = time.time()
         images = pdf_to_images(pdf_path)
         print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
@@ -301,6 +369,13 @@ class MultimodalIndexer:
         return doc_time
 
     def index_image(self, image_path: str):
+        """
+        Index a single image.
+
+        Args:
+            image_path (str)
+        """
+
         start = time.time()
         img = Image.open(image_path).convert("RGB")
         self._process_and_upsert(img, image_path, 0)
@@ -309,6 +384,19 @@ class MultimodalIndexer:
         print(f"Indexed image: {image_path} | Time: {total_time:.2f}s\n")
 
     def index_all_data(self, data_dir: str = "data"):
+        """
+        Index all PDFs and images in a directory recursively.
+
+        Supported formats:
+        ------------------
+        - PDF
+        - JPG
+        - JPEG
+        - PNG
+
+        Args:
+            data_dir (str)
+        """
         start_total = time.time()
         print("Starting full indexing...\n")
 

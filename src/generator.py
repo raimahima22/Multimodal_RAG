@@ -14,9 +14,27 @@ from PIL import Image
 from groq import RateLimitError
 import time
 
+#load environment variables from .env file
 load_dotenv('/content/drive/MyDrive/.env')
 
 def create_llm():
+    """
+    Create and return the language model instance.
+
+    Current Model:
+    meta-llama/llama-4-scout-17b-16e-instruct
+    served through OpenRouter.
+
+    Configuration:
+    - temperature=0.2
+        Lower temperature for more factual and stable outputs.
+
+    - max_tokens=1024
+        Maximum output token limit.
+
+    Returns:
+        ChatOpenAI
+    """
     return ChatOpenAI(
         model_name="meta-llama/llama-4-scout-17b-16e-instruct",
         openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
@@ -26,70 +44,88 @@ def create_llm():
     )
 
 def aggressive_cleanup():
-    
+    """
+    Clear python and CUDA memory
+    """
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
 
 class MultimodalGenerator:
+    """
+    Multimodal answer generation system using:
+    
+    - Retrieved document pages/images
+    - Vision-language model (Llama 4 Scout)
+    - Prompt-based grounded answering
+
+    Pipeline:
+    User Query
+        ↓
+    Retrieved Pages
+        ↓
+    Convert pages to images
+        ↓
+    Send images + prompt to VLM
+        ↓
+    Generate grounded answer
+
+    Features:
+    - Multi-page image reasoning
+    - PDF page extraction
+    - Token usage tracking
+    - OpenRouter integration
+    - OCR-ready architecture
+
+    """
     def __init__(self):
+        """
+        Initialize the multimodal generator.
+        """
         # self.llm = ChatGroq(
         #     model_name="meta-llama/llama-4-scout-17b-16e-instruct",
         #     groq_api_key=os.environ.get("GROQ_API_KEY"),
         #     temperature=0.2,      # Lower for more factual answers
         #     max_tokens=1024,
         # )
+
         # self.llm = GroqLLMWrapper(GROQ_KEYS)
         self.llm = create_llm()
+        # token usage tracking
         self.last_usage = {
             "input_tokens": None,
             "output_tokens": None,
             "total_tokens": None
         }
-        # self.llm = ChatOpenAI(
-        #     model_name="qwen/qwen2.5-vl-72b-instruct",   # Official OpenRouter name
-        #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
-        #     openai_api_base="https://openrouter.ai/api/v1",
-        #     temperature=0.2,
-        #     max_tokens=1024,
-            
-        # )
-
-        # self.reader = easyocr.Reader(['en'], gpu=True, model_storage_directory="easyocr_models")
-        # self.reader = easyocr.Reader(
-        #     ['en'],
-        #     gpu=torch.cuda.is_available(),
-        #     model_storage_directory="easyocr_models"
-        # )
-
-        # self.pdf_cache = {}
-    
-    # def _extract_text(self, image: Image.Image) -> str:
-    #     image=image.convert("RGB")
-    #     img = np.array(image)
-    #     results = self.reader.readtext(img)
-
-    #     texts = [r[1] for r in results]
-    #     del img, results
-    #     gc.collect()
-    
-    #     return "\n".join(texts)
-    # def _extract_text(self, image: Image.Image) -> str:
-    #     try:
-    #         text = pytesseract.image_to_string(
-    #             image.convert("RGB"),
-    #             config='--psm 6'   # assume uniform block of text
-    #         )
-    #         return text.strip()
-    #     finally:
-    #         aggressive_cleanup()
-    
 
 
     def generate_answer(self, query, retrieved_points):
+        """
+        Generate answer using retrieved multimodal documents.
+
+        Steps:
+        ------
+        1. Load retrieved pages/images
+        2. Convert pages into base64 image inputs
+        3. Build multimodal prompt
+        4. Invoke vision-language model
+        5. Track token usage
+        6. Return generated answer
+
+        Args:
+            query (str):
+                User question.
+
+            retrieved_points (List[ScoredPoint]):
+                Retrieved Qdrant search results.
+
+        Returns:
+            str:
+                Generated answer.
+        """
         
         start_gen = time.time()
-        # 
+        # containers for retrieved content
         images = []
         texts = []
 
@@ -104,24 +140,8 @@ class MultimodalGenerator:
                 page_img = Image.open(source).convert("RGB")
 
             images.append(page_img)
-
-            # extracted_text = self._extract_text(page_img)
-            # extracted_text = point.payload.get("ocr_text", "")
-            # texts.append(extracted_text)
-        # combined_text = "\n\n---\n\n".join(texts)
-        # combined_text = ""
-
-        # for i, (point, text) in enumerate(zip(retrieved_points, texts), 1):
-        #     page = point.payload.get("page_number")
-
-        #     combined_text += f"""
-        # [Document {i} | Page {page} | Rank {i}]
-
-        # {text}
-
-        # ---------------------
-        # """
-
+        
+        #convert images to OpenAI-compatible image messages
         image_messages = [
             {
                 "type": "image_url",
@@ -131,6 +151,8 @@ class MultimodalGenerator:
             }
             for img in images[:3]
         ]
+
+        #prompt construction
         message = HumanMessage(
             content=[
                 {

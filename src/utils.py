@@ -16,10 +16,10 @@ def get_pdf_page(pdf_path: str, page_num: int, dpi: int = RAG_DPI) -> Image.Imag
     if key in _page_cache:
         return _page_cache[key]
     
-    doc = fitz.open(pdf_path)
-    page = doc[page_num]
+    doc = fitz.open(pdf_path) #open pdf document
+    page = doc[page_num] #access requested page
     mat = fitz.Matrix(dpi / 72, dpi / 72)
-    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB) #render page to RGB pixmap
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     doc.close()
     
@@ -33,11 +33,14 @@ def clear_page_cache():
 
 
 def pdf_to_images(pdf_path):
-    # Converts PDF pages to PIL Images
+    """
+    Converts PDF pages to PIL Images. Uses pdf2image internally
+    """
     return convert_from_path(pdf_path, dpi=RAG_DPI)
 
 def pil_to_base64(image):
-    # Encodes PIL image to base64 for LLM transmission
+    """Encodes PIL image to base64 for LLM transmission
+    """
     buffered = BytesIO()
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
