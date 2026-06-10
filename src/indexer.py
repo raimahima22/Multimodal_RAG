@@ -29,6 +29,9 @@ from qdrant_client.models import (
     PointStruct,
     MultiVectorConfig,
     MultiVectorComparator,
+    Filter,
+    FieldCondition,
+    MatchValue,
 )
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from transformers import AutoProcessor
@@ -210,6 +213,42 @@ class MultimodalIndexer:
             print(f"Error checking collection: {e}")
             return True
 
+    def page_exists(self, source: str, page_num: int) -> bool:
+        """
+        Check whether a page from a document has already been indexed.
+
+        Args:
+            source (str): file path
+            page_num (int): page number
+
+        Returns:
+            bool
+        """
+        try:
+            points, _ = self.local_client.scroll(
+                collection_name=self.collection_name,
+                limit=1,
+                with_vectors=False,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="source",
+                            match=MatchValue(value=str(source))
+                        ),
+                        FieldCondition(
+                            key="page_number",
+                            match=MatchValue(value=page_num)
+                        )
+                    ]
+                )
+            )
+
+            return len(points) > 0
+
+        except Exception as e:
+            print(f"Error checking page existence: {e}")
+            return False
+
     def _extract_image_embeddings(self, pil_img: Image.Image) -> np.ndarray:
         """
         Generate ColQwen2.5 multi-vector embeddings.
@@ -343,6 +382,8 @@ class MultimodalIndexer:
         return page_time
 
 
+
+
     def index_document(self, pdf_path: str):
         """
         Index an entire PDF document.
@@ -357,17 +398,43 @@ class MultimodalIndexer:
         start_doc = time.time()
         images = pdf_to_images(pdf_path)
         print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
+        print(f"Total pages: {len(images)}")
 
         total_time = 0.0
+        indexed_pages = 0
+        skipped_pages = 0
         for i, img in enumerate(images):
-            page_time = self._process_and_upsert(img, pdf_path, i)
+            # Skip pages already indexed
+            if self.page_exists(pdf_path, i):
+                print(f"Page {i} already indexed. Skipping.")
+                skipped_pages += 1
+                continue
+
+            print(f"Indexing page {i}...")
+
+            page_time = self._process_and_upsert(
+                img,
+                pdf_path,
+                i
+            )
+
             total_time += page_time
+            indexed_pages += 1
 
         doc_time = time.time() - start_doc
-        print(f"Finished PDF: {pdf_path} | Total: {doc_time:.2f}s | Avg/page: {doc_time/len(images):.2f}s\n")
-        aggressive_cleanup()
-        return doc_time
 
+        print("\n======================================")
+        print(f"Finished PDF: {pdf_path}")
+        print(f"New pages indexed : {indexed_pages}")
+        print(f"Skipped pages     : {skipped_pages}")
+        print(f"Total pages       : {len(images)}")
+        print(f"Total time        : {doc_time:.2f}s")
+        print("======================================\n")
+
+        aggressive_cleanup()
+
+        return doc_time
+        
     def index_image(self, image_path: str):
         """
         Index a single image.
