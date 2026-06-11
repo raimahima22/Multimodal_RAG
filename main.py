@@ -517,8 +517,8 @@ def main(force_reindex=False):
         clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
-        
-    # ── Custom CSS (Slightly adjusted for better responsiveness) ─────────────
+
+    # ── Custom CSS ─────────────
     custom_css = """
     @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
     
@@ -583,30 +583,21 @@ def main(force_reindex=False):
         
         gr.HTML("""
             <div id="main-title">Multimodal RAG Assistant</div>
-            <div id="main-subtitle">Intelligent Document Q&A over SBC & SPD using Vision-Language Retrieval</div>
+            <div id="main-subtitle">Intelligent Document Q&A over SBC & SPD using LangGraph Agent</div>
         """)
 
         with gr.Row(elem_classes=["app-shell"]):
             # Sidebar
             with gr.Column(elem_id="sidebar", scale=0, min_width=260):
-                gr.HTML('<div class="sidebar-sub">Knowledge Base</div>')
-                source_dropdown = gr.Dropdown(
-                    choices=list(source_map.keys()),
-                    value="Both Documents",
-                    label="",
-                    container=False,
-                    scale=1
-                )
+                gr.HTML('<strong>Knowledge Base</strong>')
+                gr.HTML('<p><small>SBC + SPD Documents</small></p>')
                 
-                gr.HTML('<div class="sidebar-sub">Actions</div>')
+                gr.HTML('<strong>Actions</strong>')
                 clear_btn = gr.Button("🗑 Clear Chat", elem_id="clear-btn", size="sm")
 
                 gr.HTML("""
-                    <div style="margin-top: auto;">
-                        <div class="status-badge">
-                            <div class="status-dot"></div>
-                            Ready • Qdrant + PyTorch
-                        </div>
+                    <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
+                        Ready • LangGraph Agent • Qdrant + ColQwen2.5
                     </div>
                 """)
 
@@ -623,7 +614,7 @@ def main(force_reindex=False):
 
                 with gr.Row():
                     msg = gr.Textbox(
-                        placeholder="Ask a question about your documents...",
+                        placeholder="Ask a question about your benefits plan...",
                         scale=8,
                         container=False,
                         lines=1,
@@ -635,12 +626,12 @@ def main(force_reindex=False):
 
                 gr.Examples(
                     examples=[
-                        ["What is the deductible for this plan?", "SPD"],
-                        ["What services are covered?", "SBC"],
-                        ["Compare benefits between both documents.", "Both Documents"],
-                        ["What is the out-of-pocket maximum?", "SPD"],
+                        ["What is the deductible for this plan?"],
+                        ["What services are covered under preventive care?"],
+                        ["What is the out-of-pocket maximum?"],
+                        ["Tell me about eligibility and enrollment rules."],
                     ],
-                    inputs=[msg, source_dropdown],
+                    inputs=[msg],
                     label="Example Queries",
                     cache_examples=False
                 )
@@ -648,23 +639,23 @@ def main(force_reindex=False):
         # Event Handling
         msg.submit(
             user_turn,
-            inputs=[msg, chatbot, source_dropdown],
+            inputs=[msg, chatbot],
             outputs=[chatbot, msg, msg, submit_btn],
             queue=False
         ).then(
             bot_turn,
-            inputs=[chatbot, source_dropdown],
+            inputs=[chatbot],
             outputs=[chatbot, msg, submit_btn]
         )
 
         submit_btn.click(
             user_turn,
-            inputs=[msg, chatbot, source_dropdown],
+            inputs=[msg, chatbot],
             outputs=[chatbot, msg, msg, submit_btn],
             queue=False
         ).then(
             bot_turn,
-            inputs=[chatbot, source_dropdown],
+            inputs=[chatbot],
             outputs=[chatbot, msg, submit_btn]
         )
 
