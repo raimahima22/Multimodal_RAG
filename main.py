@@ -115,7 +115,7 @@ def main(force_reindex=False):
             return None, "No audio received. Please record again."
         
         try:
-            audio_path, result_text = voice_iface.voice_pipeline(audio)
+            audio_path, result_text = voice_interface.voice_pipeline(audio)
             return audio_path, result_text
         except Exception as e:
             return None, f"Error in voice pipeline: {str(e)}"
