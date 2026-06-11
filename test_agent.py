@@ -11,7 +11,7 @@ def test_routing():
         ("What services are covered under this plan?", "SBC"),
     ]
     
-    print("🧪 Testing LangGraph Tool Routing\n")
+    print(" Testing LangGraph Tool Routing\n")
     
     for query, expected in test_cases:
         print(f"Query: {query}")

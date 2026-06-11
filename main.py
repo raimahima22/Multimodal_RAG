@@ -422,6 +422,7 @@ from src.utils import clear_page_cache
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
+from src.agent import run_agent
 
 HISTORY_FILE = "chat_history.json"
 
@@ -489,47 +490,28 @@ def main(force_reindex=False):
         
         return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
-    # ── Bot Turn: Generate real answer ───────────────────────────────────────
+        # ── Bot Turn: Generate real answer ───────────────────────────────────────
     def bot_turn(history, source_choice):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
-        
+    
         query = history[-2]["content"]
-        source_filter = source_map.get(source_choice)
-
+    
         try:
-            hits = retriever.search(query, top_k=3, source_filter=source_filter)
-
-            if not hits:
-                bot_response = (
-                    "ℹ️ No relevant information found in the selected documents.\n\n"
-                    "Try rephrasing your question or changing the document filter."
-                )
-            else:
-                context_hits = sorted(hits, key=lambda x: x.score, reverse=True)
-                best_hit = context_hits[0]
-                
-                source = best_hit.payload.get("source", "Unknown")
-                page = best_hit.payload.get("page_number", "N/A")
-                
-                answer = generator.generate_answer(query, context_hits)
-                
-                bot_response = (
-                    f"📄 **Source:** `{os.path.basename(source)}` "
-                    f"**Page:** {page} "
-                    f"**Scope:** {source_choice}\n\n"
-                    f"---\n\n"
-                    f"{answer}"
-                )
-                save_to_history(query, source_choice, answer)
-
+            # ←←← NEW: Use the LangGraph Agent ←←←
+            answer = run_agent(query)
+        
+            bot_response = f"**Scope:** {source_choice}\n\n---\n\n{answer}"
+        
+            save_to_history(query, source_choice, answer)
+        
         except Exception as e:
-            bot_response = f"⚠️ **Error while generating response:**\n\n```\n{str(e)}\n```"
+            bot_response = f"⚠️ Error: {str(e)}"
+    
         finally:
             clear_page_cache()
             aggressive_cleanup()
-
-        # Replace thinking message with real answer
+    
         history[-1] = {"role": "assistant", "content": bot_response}
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
