@@ -456,18 +456,6 @@ def main(force_reindex=False):
     print("\nInitializing Multimodal RAG System...\n")
     
     indexer = MultimodalIndexer(force_recreate=force_reindex)
-
-    # 2. Always run indexing (resumable) unless forcing full reindex
-    print("=== Checking / Resuming Indexing ===")
-    if force_reindex:
-        print("Force reindexing everything...")
-        indexer.index_all_data("data")
-    else:
-        print("Running resumable indexing (will skip already indexed pages)...")
-        indexer.index_all_data("data")        # ← This now handles resume
-    
-    print(" Indexing phase completed / resumed.\n")
-    
     retriever = MultimodalRetriever(indexer)
     generator = MultimodalGenerator()
 
@@ -514,7 +502,7 @@ def main(force_reindex=False):
 
             if not hits:
                 bot_response = (
-                    " No relevant information found in the selected documents.\n\n"
+                    "ℹ️ No relevant information found in the selected documents.\n\n"
                     "Try rephrasing your question or changing the document filter."
                 )
             else:

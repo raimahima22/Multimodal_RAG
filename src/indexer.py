@@ -262,40 +262,6 @@ class MultimodalIndexer:
             print(f"OCR failed: {e}")
             return ""
 
-    def _get_indexed_pages(self, source: str) -> set:
-        """Return set of page numbers already indexed for this document (with pagination)."""
-        indexed_pages = set()
-        offset = None
-        limit = 300  # safe batch size
-
-        try:
-            while True:
-                result = self.local_client.scroll(
-                    collection_name=self.collection_name,
-                    limit=limit,
-                    offset=offset,
-                    with_vectors=False,
-                    with_payload=True,
-                    filter={
-                        "must": [{"key": "source", "match": {"value": source}}]
-                    }
-                )
-                points = result[0] if result and isinstance(result, (list, tuple)) else []
-                
-                for p in points:
-                    if p.payload and "page_number" in p.payload:
-                        indexed_pages.add(p.payload["page_number"])
-                
-                if len(points) < limit:
-                    break
-                offset = result[1] if len(result) > 1 else None
-            
-            print(f" Found {len(indexed_pages)} already indexed pages for {Path(source).name}")
-            return indexed_pages
-        except Exception as e:
-            print(f" Could not fetch indexed pages for {source}: {e}")
-            return set()
-
     def _process_and_upsert(self, pil_img: Image.Image, source: str, page_num: int):
         """
         Process a page/image and store embeddings in Qdrant.
@@ -379,34 +345,26 @@ class MultimodalIndexer:
 
     def index_document(self, pdf_path: str):
         """
-        Index an entire PDF document - RESUMABLE.
-        """
-        source = str(pdf_path)
-        start_doc = time.time()
-        
-        images = pdf_to_images(pdf_path)
-        print(f"\n Processing PDF: {Path(pdf_path).name} ({len(images)} pages)")
+        Index an entire PDF document.
 
-        already_indexed = self._get_indexed_pages(source)
-        
+        Args:
+            pdf_path (str)
+
+        Returns:
+            float: Total indexing time
+        """
+
+        start_doc = time.time()
+        images = pdf_to_images(pdf_path)
+        print(f"\nProcessing PDF: {pdf_path} ({len(images)} pages)")
+
         total_time = 0.0
-        processed_count = 0
-        
         for i, img in enumerate(images):
-            if i in already_indexed:
-                print(f" Skipping page {i} (already indexed)")
-                continue
-                
-            print(f" Processing page {i + 1}/{len(images)}")
-            page_time = self._process_and_upsert(img, source, i)
+            page_time = self._process_and_upsert(img, pdf_path, i)
             total_time += page_time
-            processed_count += 1
 
         doc_time = time.time() - start_doc
-        print(f" Finished PDF: {Path(pdf_path).name} | "
-              f"Processed: {processed_count}/{len(images)} new pages | "
-              f"Total time: {doc_time:.2f}s\n")
-        
+        print(f"Finished PDF: {pdf_path} | Total: {doc_time:.2f}s | Avg/page: {doc_time/len(images):.2f}s\n")
         aggressive_cleanup()
         return doc_time
 
@@ -453,6 +411,16 @@ class MultimodalIndexer:
         total_index_time = time.time() - start_total
         aggressive_cleanup()
         print(f"ALL INDEXING COMPLETED in {total_index_time:.2f} seconds!\n")
+
+    def index_folder(self, folder_path: str, source_type: str = None):
+        """Convenience method to index all PDFs in a folder"""
+        folder = Path(folder_path)
+        if not folder.exists():
+            print(f"Folder not found: {folder_path}")
+            return
+        for pdf_file in sorted(folder.rglob("*.pdf")):
+            print(f"\n Indexing {source_type or 'document'}: {pdf_file.name}")
+            self.index_document(str(pdf_file))
     
     def close(self):
         if self.local_client:
