@@ -68,12 +68,15 @@ def main(force_reindex=False):
     #     "SPD": "data/spd.pdf",
     # }
     print("Warming up Agent and retrieval models...")
+
     # Warmup both tools via the agent
     try:
         _ = run_agent("warmup query for initialization")
     except Exception as e:
         print(f"Warning during warmup: {e}")
     print("System Ready!\n")
+
+    voice_interface = get_voice_interface(run_agent)
 
     # ── User Turn: Show message immediately + thinking indicator ─────────────
     def user_turn(message, history):
