@@ -5,3 +5,8 @@ langchain
 qdrant-client
 pillow
 python-dotenv
+faster-whisper
+TTS
+sounddevice
+numpy
+gradio
