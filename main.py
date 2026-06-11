@@ -13,7 +13,7 @@ from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 from src.agent import run_agent
-from src.agent import get_voice_interface
+from src.voice import get_voice_interface
 
 HISTORY_FILE = "chat_history.json"
 
