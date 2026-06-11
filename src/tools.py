@@ -3,24 +3,29 @@ from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
 # Lazy loading for efficiency
-_sbc_indexer = None
-_spd_indexer = None
+_shared_indexer = None
 _sbc_retriever = None
 _spd_retriever = None
 _generator = None
 
+def _get_shared_indexer(collection_name: str):
+    global _shared_indexer
+    if _shared_indexer is None:
+        _shared_indexer = MultimodalIndexer(collection_name=collection_name)  # reuse model
+    return _shared_indexer
+
 def _get_sbc_retriever():
-    global _sbc_indexer, _sbc_retriever
+    global _sbc_retriever
     if _sbc_retriever is None:
-        _sbc_indexer = MultimodalIndexer(collection_name="sbc_collection")
-        _sbc_retriever = MultimodalRetriever(_sbc_indexer)
+        indexer = _get_shared_indexer("sbc_collection")
+        _sbc_retriever = MultimodalRetriever(indexer)
     return _sbc_retriever
 
 def _get_spd_retriever():
-    global _spd_indexer, _spd_retriever
+    global _spd_retriever
     if _spd_retriever is None:
-        _spd_indexer = MultimodalIndexer(collection_name="spd_collection")
-        _spd_retriever = MultimodalRetriever(_spd_indexer)
+        indexer = _get_shared_indexer("spd_collection")
+        _spd_retriever = MultimodalRetriever(indexer)
     return _spd_retriever
 
 def _get_generator():
