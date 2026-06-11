@@ -79,33 +79,54 @@ class VoiceInterface:
     # --------------------
     # PIPELINE
     # --------------------
-    def voice_pipeline(audio):
-        """Full voice → agent → voice response (with latency tracking)"""
+    # def voice_pipeline(self, audio):
+    #     """Full voice → agent → voice response (with latency tracking)"""
     
+    #     if audio is None:
+    #         return None, "No audio received. Please record again."
+
+    #     try:
+    #         total_start = time.time()
+
+    #         # Voice pipeline (STT + LLM + TTS)
+       
+    #         pipeline_start = time.time()
+    #         audio_path, result_text = voice_interface.voice_pipeline(audio)
+    #         pipeline_latency = time.time() - pipeline_start
+
+    #         total_latency = time.time() - total_start
+
+    #         # Append latency info to output text
+    #         result_text += (
+    #             f"\n\n **Pipeline Latency:** {pipeline_latency:.2f}s"
+    #             f"\n **Total Latency:** {total_latency:.2f}s"
+    #         )
+
+    #         return audio_path, result_text
+
+    #     except Exception as e:
+    #         return None, f"Error in voice pipeline: {str(e)}"
+
+    def voice_pipeline(self, audio):
+        """STT → Agent → TTS pipeline"""
+
         if audio is None:
             return None, "No audio received. Please record again."
 
-        try:
-            total_start = time.time()
+        query = self.transcribe_audio(audio)
 
-            # Voice pipeline (STT + LLM + TTS)
-       
-            pipeline_start = time.time()
-            audio_path, result_text = voice_interface.voice_pipeline(audio)
-            pipeline_latency = time.time() - pipeline_start
+        if not query:
+            return None, "Could not understand audio."
 
-            total_latency = time.time() - total_start
+        print(f"User said: {query}")
 
-            # Append latency info to output text
-            result_text += (
-                f"\n\n **Pipeline Latency:** {pipeline_latency:.2f}s"
-                f"\n **Total Latency:** {total_latency:.2f}s"
-            )
+        start = time.time()
+        answer = self.agent_func(query)
+        print(f"Agent Latency: {time.time() - start:.2f}s")
 
-            return audio_path, result_text
+        audio_path = self.speak(answer)
 
-        except Exception as e:
-            return None, f"Error in voice pipeline: {str(e)}"
+        return audio_path, answer
 
 
 voice_interface = None
