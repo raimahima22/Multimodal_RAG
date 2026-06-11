@@ -456,29 +456,36 @@ def aggressive_cleanup():
 def main(force_reindex=False):
     print("\nInitializing Multimodal RAG System...\n")
     
-    indexer = MultimodalIndexer(force_recreate=force_reindex)
-    retriever = MultimodalRetriever(indexer)
-    generator = MultimodalGenerator()
+    # indexer = MultimodalIndexer(force_recreate=force_reindex)
+    # retriever = MultimodalRetriever(indexer)
+    # generator = MultimodalGenerator()
 
-    print("Warming up retrieval model...")
-    _ = retriever._extract_text_embedding("warmup query")
+    # print("Warming up retrieval model...")
+    # _ = retriever._extract_text_embedding("warmup query")
+    # print("System Ready!\n")
+
+    # if force_reindex or indexer.is_collection_empty():
+    #     print("Indexing documents...\n")
+    #     indexer.index_all_data("data")
+    #     print("Indexing completed!\n")
+    # else:
+    #     print("Existing index found. Skipping indexing.\n")
+
+    # source_map = {
+    #     "Both Documents": None,
+    #     "SBC": "data/sbc.pdf",
+    #     "SPD": "data/spd.pdf",
+    # }
+    print("Warming up Agent and retrieval models...")
+    # Warmup both tools via the agent
+    try:
+        _ = run_agent("warmup query for initialization")
+    except Exception as e:
+        print(f"Warning during warmup: {e}")
     print("System Ready!\n")
 
-    if force_reindex or indexer.is_collection_empty():
-        print("Indexing documents...\n")
-        indexer.index_all_data("data")
-        print("Indexing completed!\n")
-    else:
-        print("Existing index found. Skipping indexing.\n")
-
-    source_map = {
-        "Both Documents": None,
-        "SBC": "data/sbc.pdf",
-        "SPD": "data/spd.pdf",
-    }
-
     # ── User Turn: Show message immediately + thinking indicator ─────────────
-    def user_turn(message, history, source_choice):
+    def user_turn(message, history):
         if not message or not message.strip():
             return history, "", gr.update(interactive=False), gr.update(interactive=False)
         
@@ -490,31 +497,27 @@ def main(force_reindex=False):
         
         return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
-        # ── Bot Turn: Generate real answer ───────────────────────────────────────
-    def bot_turn(history, source_choice):
+    # ── Bot Turn: Generate real answer using LangGraph Agent ─────────────────
+    def bot_turn(history):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
-    
+        
         query = history[-2]["content"]
-    
+        
         try:
-            # ←←← NEW: Use the LangGraph Agent ←←←
-            answer = run_agent(query)
-        
-            bot_response = f"**Scope:** {source_choice}\n\n---\n\n{answer}"
-        
-            save_to_history(query, source_choice, answer)
-        
+            bot_response = run_agent(query)
+            save_to_history(query, "Agent (SBC/SPD)", bot_response)
         except Exception as e:
-            bot_response = f"⚠️ Error: {str(e)}"
-    
-        finally:
-            clear_page_cache()
-            aggressive_cleanup()
-    
+            bot_response = f"⚠️ **Error while generating response:**\n\n{str(e)}"
+        
+        # Replace thinking message with real answer
         history[-1] = {"role": "assistant", "content": bot_response}
+        
+        aggressive_cleanup()
+        clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
+        
     # ── Custom CSS (Slightly adjusted for better responsiveness) ─────────────
     custom_css = """
     @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');

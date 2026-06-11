@@ -10,18 +10,40 @@ from src.tools import search_sbc, search_spd
 from src.generator import create_llm
 
 llm = create_llm()
-tools = [search_sbc, search_spd]
+
+# ── Wrap tools properly for LangGraph ─────────────────────────────
+@tool
+def search_sbc_tool(query: str) -> str:
+    """Search the Summary of Benefits and Coverage (SBC) document.
+    Use this for questions about deductibles, copays, coinsurance, covered services,
+    out-of-pocket maximums, and quick benefit summaries."""
+    return search_sbc(query)
+
+@tool
+def search_spd_tool(query: str) -> str:
+    """Search the Summary Plan Description (SPD) document.
+    Use this for detailed plan rules, eligibility, exclusions, definitions,
+    claim procedures, and in-depth policy information."""
+    return search_spd(query)
+
+tools = [search_sbc_tool, search_spd_tool]
 llm_with_tools = llm.bind_tools(tools)
 
 class AgentState(TypedDict):
     messages: Annotated[List, operator.add]
 
 system_prompt = SystemMessage(content="""
-You are a helpful healthcare benefits assistant with access to SBC and SPD documents.
-- Use search_sbc for questions about Summary of Benefits and Coverage (coverage details, deductibles, copays, etc.)
-- Use search_spd for detailed plan rules, eligibility, exclusions, definitions.
-- You can call both tools if the question needs information from both.
-- Always answer based on retrieved information. Be clear and professional.
+You are an expert healthcare benefits assistant with access to two key documents:
+- SBC (Summary of Benefits and Coverage): Best for quick benefit details, costs, and coverage.
+- SPD (Summary Plan Description): Best for detailed rules, eligibility, exclusions, and procedures.
+
+Rules:
+- Use search_sbc_tool for simple coverage questions (deductibles, copays, what’s covered).
+- Use search_spd_tool for detailed explanations, limitations, or definitions.
+- You may call both tools if the question requires information from both documents.
+- Always base your final answer strictly on the tool results.
+- Be clear, professional, and concise. Use bullet points when helpful.
+- If no relevant information is found, clearly say so.
 """)
 
 def agent_node(state: AgentState):
@@ -35,20 +57,33 @@ def build_agent():
     workflow.add_node("tools", ToolNode(tools))
 
     workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", tools_condition, {"tools": "tools", "__end__": END})
+    workflow.add_conditional_edges(
+        "agent",
+        tools_condition,
+        {"tools": "tools", "__end__": END}
+    )
     workflow.add_edge("tools", "agent")
 
     return workflow.compile()
 
-# Global agent instance
-voice_agent = build_agent()
+# Global compiled agent
+agent = build_agent()
 
 def run_agent(query: str) -> str:
-    """Easy function to call the agent from main.py or anywhere"""
+    """Call this from main.py"""
     if not query or not query.strip():
-        return "Please ask a question."
+        return "Please ask a question about your benefits."
     
     inputs = {"messages": [HumanMessage(content=query)]}
-    result = voice_agent.invoke(inputs)
-    final_response = result["messages"][-1].content
-    return final_response
+    
+    try:
+        result = agent.invoke(inputs, {"recursion_limit": 12})
+        final_message = result["messages"][-1]
+        
+        # If it's a tool call response, return the content
+        if hasattr(final_message, "content"):
+            return final_message.content
+        return str(final_message)
+        
+    except Exception as e:
+        return f"⚠️ Error processing your request: {str(e)}"
