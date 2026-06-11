@@ -11,7 +11,7 @@ from piper import PiperVoice  # NEW (instead of TTS)
 
 MODEL_PATH = os.path.join(
     "/content/drive/MyDrive/piper_models",
-    "en_US-lessac-medium.onnx"
+    "en_US-amy-medium.onnx"
 )
 
 class VoiceInterface:
