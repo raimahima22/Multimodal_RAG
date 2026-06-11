@@ -188,6 +188,11 @@ class MultimodalIndexer:
         )
         print(f" Successfully created collection '{self.collection_name}' with 'image' vector")
 
+    def _recreate_collection(self):
+        if self.local_client.collection_exists(self.collection_name):
+            self.local_client.delete_collection(self.collection_name)
+        self._setup_collection()
+
     def is_collection_empty(self) -> bool:
         """
         Check whether collection exists and contains data.
