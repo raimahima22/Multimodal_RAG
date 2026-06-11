@@ -54,3 +54,7 @@ qdrant_db/
 qdrant_storage/
 storage/
 qdrant_data/
+
+models/
+*.onnx
+*.json
