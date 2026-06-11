@@ -3,10 +3,16 @@ import torch
 import numpy as np
 import sounddevice as sd
 import gradio as gr
+import os
 
 from faster_whisper import WhisperModel
 from piper import PiperVoice  # NEW (instead of TTS)
 
+
+MODEL_PATH = os.path.join(
+    "/content/drive/MyDrive/piper_models",
+    "en_US-lessac-medium.onnx"
+)
 
 class VoiceInterface:
     def __init__(self, agent_func):
@@ -31,7 +37,7 @@ class VoiceInterface:
 
         # Path to downloaded model (YOU MUST SET THIS)
         self.voice = PiperVoice.load(
-            model_path="models/en_US-lessac-medium.onnx"
+            model_path=MODEL_PATH
         )
 
         self.sample_rate = 22050
