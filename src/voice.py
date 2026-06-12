@@ -83,29 +83,20 @@ class VoiceInterface:
             print(type(first_item))
             print(first_item)
 
-            # CASE 1: (audio, sample_rate)
+            chunks = []
+            sample_rate = self.sample_rate
 
-            if isinstance(result, tuple) and len(result) == 2:
-                audio, sr = result
-                sf.write(output_path, audio, sr)
-                return output_path
-
-            # CASE 2: numpy array
-
-            elif isinstance(result, np.ndarray):
-                sf.write(output_path, result, self.sample_rate)
-                return output_path
-
-            # CASE 3: list / iterable audio
-            elif isinstance(result, (list, tuple)):
-                audio = np.array(result)
-                sf.write(output_path, audio, self.sample_rate)
-                return output_path
-
-            # CASE 4: unknown object → crash safely
-            else:
-                print("Unexpected Piper output:", type(result))
+            for chunk in result:
+                sample_rate = chunk.sample_rate
+                chunks.append(chunk.audio_float_array)
+            
+            if len(chunks) == 0:
+                print("No audio chunks generated.")
                 return None
+            
+            audio = np.concatenate(chunks)
+            sf.write(output_path, audio, sample_rate)
+            return output_path
 
             
 
@@ -130,12 +121,21 @@ class VoiceInterface:
         answer = self.agent_func(query)
         print(f"Agent Latency: {time.time() - start:.2f}s")
 
-        audio_path = self.speak(answer)
+        audio_stream = self.speak_stream(answer)
 
-        return audio_path, answer
+        return audio_stream, answer
 
         gc.collect()
         torch.cuda.empty_cache()
+    
+
+    def speak_stream(self, text: str):
+        """
+        Yield audio chunks suitable for Gradio streaming.
+        """
+        for chunk in self.voice.synthesize(text):
+            # chunk.audio_float_array is float32 numpy array
+            yield (chunk.sample_rate, chunk.audio_float_array)
 
 
 voice_interface = None

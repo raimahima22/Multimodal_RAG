@@ -882,7 +882,7 @@ def main(force_reindex=False):
                         final_text = f"**{answer}**"
 
                         # Return generator for streaming audio
-                        audio_generator = voice_interface.speak_to_file(answer)
+                        audio_generator = voice_interface.speak_stream(answer)
 
                         return audio_generator, transcription_text, final_text
 
