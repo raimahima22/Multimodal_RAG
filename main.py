@@ -1,5 +1,3 @@
-
-
 import sys
 import gc
 import os
@@ -27,14 +25,14 @@ def save_to_history(query, source_input, answer):
                 history_data = json.load(f)
         except Exception:
             history_data = []
-    
+
     history_data.append({
         "timestamp": datetime.now().isoformat(),
         "query": query,
         "source": source_input,
         "answer": answer,
     })
-    
+
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
@@ -47,30 +45,8 @@ def aggressive_cleanup():
 
 def main(force_reindex=False):
     print("\nInitializing Multimodal Voice RAG System...\n")
-    
-    # indexer = MultimodalIndexer(force_recreate=force_reindex)
-    # retriever = MultimodalRetriever(indexer)
-    # generator = MultimodalGenerator()
 
-    # print("Warming up retrieval model...")
-    # _ = retriever._extract_text_embedding("warmup query")
-    # print("System Ready!\n")
-
-    # if force_reindex or indexer.is_collection_empty():
-    #     print("Indexing documents...\n")
-    #     indexer.index_all_data("data")
-    #     print("Indexing completed!\n")
-    # else:
-    #     print("Existing index found. Skipping indexing.\n")
-
-    # source_map = {
-    #     "Both Documents": None,
-    #     "SBC": "data/sbc.pdf",
-    #     "SPD": "data/spd.pdf",
-    # }
     print("Warming up Agent and retrieval models...")
-
-    # Warmup both tools via the agent
     try:
         _ = run_agent("warmup query for initialization")
     except Exception as e:
@@ -79,834 +55,604 @@ def main(force_reindex=False):
 
     voice_interface = get_voice_interface(run_agent)
 
-    # ── User Turn: Show message immediately + thinking indicator ─────────────
     def user_turn(message, history):
         if not message or not message.strip():
             return history, "", gr.update(interactive=False), gr.update(interactive=False)
-        
-        # history = history or []
-        # history = history + [
-        #     {"role": "user", "content": message.strip()},
-        #     {"role": "assistant", "content": "Thinking..."}
-        # ]
         history = history or []
-        history.append([message.strip(), "Thinking..."])
-        
+        history.append([message.strip(), "Thinking…"])
         return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
-    # ── Bot Turn: Generate real answer using LangGraph Agent ─────────────────
     def bot_turn(history):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
-        
         query = history[-1][0]
-        
         try:
             bot_response = run_agent(query)
             save_to_history(query, "Agent (SBC/SPD)", bot_response)
         except Exception as e:
-            bot_response = f" **Error while generating response:**\n\n{str(e)}"
-        
-        # Replace thinking message with real answer
-        # history[-1] = {"role": "assistant", "content": bot_response}
-        history[-1][1] = bot_response        
+            bot_response = f"**Error generating response:**\n\n{str(e)}"
+        history[-1][1] = bot_response
         aggressive_cleanup()
         clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
-    
-    def speak_stream(self, text: str):
-        """Generator that yields audio chunks for Gradio streaming"""
-        start = time.time()
-        
+
+    def streaming_voice_pipeline(audio):
+        if audio is None:
+            return None, "No audio received. Please record again.", "**Please record something.**"
         try:
-            # Piper supports raw streaming synthesis
-            for audio_bytes in self.voice.synthesize_stream_raw(
-                text,
-                speaker_id=None,
-                length_scale=1.0,
-                noise_scale=0.667,
-                noise_w=0.8
-            ):
-                yield audio_bytes  # Yield raw PCM chunks
-                
-            print(f"TTS Streaming completed in {time.time() - start:.2f}s")
-            
+            vi = get_voice_interface(run_agent)
+            query = vi.transcribe_audio(audio)
+            if not query or not query.strip():
+                return None, "Could not understand audio.", "**Try speaking more clearly.**"
+            transcription_text = f"**You said:** {query}"
+            answer = run_agent(query)
+            final_text = f"**{answer}**"
+            for chunk in vi.speak_stream(answer):
+                yield chunk, transcription_text, final_text
         except Exception as e:
-            print(f"TTS Streaming Error: {e}")
-            # Fallback: yield silent audio or error
-            yield b''
+            print(f"Voice Error: {e}")
+            return None, f"Error: {str(e)}", "**Processing failed.**"
 
-        # ── Voice Functions ─────────────────────────────────────────────────
-    # def voice_pipeline(audio):
-    #     """Full voice → agent → voice response"""
-    #     if audio is None:
-    #         return None, "No audio received. Please record again."
-        
-    #     try:
-    #         total_start = time.time()
-    #         pipeline_start = time.time()
-    #         audio_path, result_text = voice_interface.voice_pipeline(audio)
-    #         pipeline_latency = time.time() - pipeline_start
-
-    #         total_latency = time.time() - total_start
-
-    #         result_text += (
-    #             f"\n\n Pipeline Latency: {pipeline_latency:.2f}s"
-    #             f"\n Total Latency: {total_latency:.2f}s"
-    #         )
-    #         return audio_path, result_text
-    #     except Exception as e:
-    #         return None, f"Error in voice pipeline: {str(e)}"
-
-
-    # ── Custom CSS ─────────────
-#     custom_css = """
-#     @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
-    
-#     .gradio-container {
-#         font-family: 'Lato', sans-serif !important;
-#         background: #f5f0e8 !important;
-#     }
-#     footer { display: none !important; }
-
-#     #main-title {
-#         text-align: center;
-#         font-size: 28px;
-#         font-weight: 700;
-#         color: #2c2a26;
-#         margin-bottom: 8px;
-#         letter-spacing: -0.5px;
-#     }
-#     #main-subtitle {
-#         text-align: center;
-#         font-size: 15px;
-#         color: #8a8070;
-#         margin-bottom: 20px;
-#     }
-
-#     /* Sidebar & Chat Layout */
-#     .app-shell {
-#         display: flex;
-#         min-height: 85vh;
-#         overflow: hidden;
-#         background: #f5f0e8;
-#         border-radius: 12px;
-#         box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-#     }
-#     #sidebar { 
-#         width: 260px; 
-#         min-width: 260px; 
-#         background: #ede8de; 
-#         border-right: 1px solid #d8d0c0; 
-#         padding: 24px 20px;
-#         display: flex;
-#         flex-direction: column;
-#         gap: 20px;
-#     }
-#     #chat-area {
-#         flex: 1;
-#         display: flex;
-#         flex-direction: column;
-#         background: #faf8f4;
-#     }
-#     #chatbot {
-#         background: transparent !important;
-#         border: none !important;
-#         flex: 1;
-#     }
-#     """
-
-#     with gr.Blocks(
-#         css=custom_css,
-#         title="Multimodal RAG Assistant",
-#         theme=gr.themes.Base(primary_hue="stone", neutral_hue="stone")
-#     ) as demo:
-        
-#         gr.HTML("""
-#             <div id="main-title">Multimodal RAG Assistant</div>
-#             <div id="main-subtitle">Intelligent Document Q&A over SBC & SPD using LangGraph Agent</div>
-#         """)
-
-#         with gr.Row(elem_classes=["app-shell"]):
-#             # Sidebar
-#             with gr.Column(elem_id="sidebar", scale=0, min_width=260):
-#                 gr.HTML('<strong>Knowledge Base</strong>')
-#                 gr.HTML('<p><small>SBC + SPD Documents</small></p>')
-                
-#                 gr.HTML('<strong>Actions</strong>')
-#                 clear_btn = gr.Button("🗑 Clear Chat", elem_id="clear-btn", size="sm")
-
-#                 gr.HTML("""
-#                     <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
-#                         Ready • LangGraph Agent • Qdrant + ColQwen2.5
-#                     </div>
-#                 """)
-
-#             # Main Chat Area
-#             with gr.Column(elem_id="chat-area", scale=1):
-#                 chatbot = gr.Chatbot(
-#                     elem_id="chatbot",
-#                     type="messages",
-#                     height=620,
-#                     bubble_full_width=False,
-#                     show_label=False,
-#                     render_markdown=True,
-#                 )
-
-#                 with gr.Row():
-#                     msg = gr.Textbox(
-#                         placeholder="Ask a question about your benefits plan...",
-#                         scale=8,
-#                         container=False,
-#                         lines=1,
-#                         max_lines=4,
-#                         autofocus=True,
-#                         elem_id="msg-box",
-#                     )
-#                     submit_btn = gr.Button("Send", variant="primary", scale=1, min_width=100)
-
-#                 gr.Examples(
-#                     examples=[
-#                         ["What is the deductible for this plan?"],
-#                         ["What services are covered under preventive care?"],
-#                         ["What is the out-of-pocket maximum?"],
-#                         ["Tell me about eligibility and enrollment rules."],
-#                     ],
-#                     inputs=[msg],
-#                     label="Example Queries",
-#                     cache_examples=False
-#                 )
-        
-
-#         # Event Handling
-#         msg.submit(
-#             user_turn,
-#             inputs=[msg, chatbot],
-#             outputs=[chatbot, msg, msg, submit_btn],
-#             queue=False
-#         ).then(
-#             bot_turn,
-#             inputs=[chatbot],
-#             outputs=[chatbot, msg, submit_btn]
-#         )
-
-#         submit_btn.click(
-#             user_turn,
-#             inputs=[msg, chatbot],
-#             outputs=[chatbot, msg, msg, submit_btn],
-#             queue=False
-#         ).then(
-#             bot_turn,
-#             inputs=[chatbot],
-#             outputs=[chatbot, msg, submit_btn]
-#         )
-
-#         clear_btn.click(
-#             lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
-#             None, 
-#             [chatbot, msg, submit_btn]
-#         )
-
-#     demo.launch(
-#         share=True,
-#         server_name="0.0.0.0",
-#         server_port=7860,
-#         show_error=True,
-#     )
-
-
-# if __name__ == "__main__":
-#     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-#     main(force_reindex)
-
-# ── Custom CSS ───────────────────────────────────────────────────────
+    # ── Premium CSS ────────────────────────────────────────────────────────────
     custom_css = """
-    @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
-    
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+
+    /* ── Base ── */
     .gradio-container {
-        font-family: 'Lato', sans-serif !important;
-        background: #f5f0e8 !important;
+        font-family: 'Inter', system-ui, sans-serif !important;
+        background: #F7F6F3 !important;
+        color: #1C1C1A !important;
     }
     footer { display: none !important; }
+    * { box-sizing: border-box; }
 
-    #main-title {
+    /* ── App header ── */
+    #app-header {
+        padding: 40px 0 28px;
         text-align: center;
-        font-size: 28px;
-        font-weight: 700;
-        color: #2c2a26;
-        margin-bottom: 8px;
-        letter-spacing: -0.5px;
+        border-bottom: 0.5px solid #DDDBD2;
+        margin-bottom: 28px;
     }
+    #app-wordmark {
+        font-family: 'DM Serif Display', serif;
+        font-size: 26px;
+        font-weight: 400;
+        color: #1C1C1A;
+        letter-spacing: -0.3px;
+        margin: 0 0 6px;
+    }
+    #app-tagline {
+        font-size: 13px;
+        color: #7A7869;
+        font-weight: 400;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin: 0;
+    }
+
+    /* ── Tab strip ── */
+    .tab-nav {
+        border-bottom: 0.5px solid #DDDBD2 !important;
+        background: transparent !important;
+        margin-bottom: 0 !important;
+    }
+    .tab-nav button {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: #7A7869 !important;
+        letter-spacing: 0.03em !important;
+        text-transform: uppercase !important;
+        padding: 10px 20px !important;
+        border: none !important;
+        background: transparent !important;
+        border-radius: 0 !important;
+        border-bottom: 2px solid transparent !important;
+        transition: color 0.15s, border-color 0.15s !important;
+    }
+    .tab-nav button.selected,
+    .tab-nav button:hover {
+        color: #1C1C1A !important;
+        border-bottom-color: #1C1C1A !important;
+        background: transparent !important;
+    }
+
+    /* ── Layout shell ── */
+    .layout-shell {
+        display: flex;
+        gap: 0;
+        background: #FFFFFF;
+        border: 0.5px solid #DDDBD2;
+        border-radius: 12px;
+        overflow: hidden;
+        min-height: 700px;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+        width: 240px;
+        min-width: 240px;
+        background: #F7F6F3;
+        border-right: 0.5px solid #DDDBD2;
+        padding: 28px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+    .sidebar-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #A8A695;
+        margin: 0 0 10px;
+    }
+    .sidebar-doc {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #EEECD8;
+        border: 0.5px solid #DDDBD2;
+        margin-bottom: 6px;
+    }
+    .sidebar-doc-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        background: #1C1C1A;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .sidebar-doc-icon span {
+        color: #F7F6F3;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+    }
+    .sidebar-doc-name {
+        font-size: 12px;
+        font-weight: 500;
+        color: #1C1C1A;
+        line-height: 1.3;
+    }
+    .sidebar-doc-sub {
+        font-size: 11px;
+        color: #7A7869;
+    }
+    .sidebar-divider {
+        height: 0.5px;
+        background: #DDDBD2;
+        margin: 20px 0;
+    }
+    .sidebar-stack-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #A8A695;
+        margin: 0 0 8px;
+    }
+    .sidebar-stack-item {
+        font-size: 12px;
+        color: #7A7869;
+        padding: 3px 0;
+    }
+    .sidebar-footer {
+        margin-top: auto;
+        padding-top: 20px;
+    }
+    .status-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #3B6D11;
+        margin-right: 6px;
+        vertical-align: middle;
+    }
+    .status-text {
+        font-size: 11px;
+        color: #7A7869;
+    }
+
+    /* ── Clear button ── */
+    #clear-btn {
+        width: 100% !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        color: #7A7869 !important;
+        background: transparent !important;
+        border: 0.5px solid #DDDBD2 !important;
+        border-radius: 6px !important;
+        padding: 7px 12px !important;
+        text-align: left !important;
+        cursor: pointer !important;
+        transition: background 0.12s, color 0.12s !important;
+    }
+    #clear-btn:hover {
+        background: #EEECD8 !important;
+        color: #1C1C1A !important;
+    }
+
+    /* ── Chat area ── */
+    #chat-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: #FFFFFF;
+    }
+
+    /* ── Chatbot messages ── */
+    #chatbot {
+        background: transparent !important;
+        border: none !important;
+        flex: 1;
+        padding: 24px 28px 0 !important;
+    }
+    #chatbot .message-row {
+        margin-bottom: 16px !important;
+    }
+    #chatbot .user .message,
+    #chatbot .bot .message {
+        font-size: 14px !important;
+        line-height: 1.7 !important;
+        border-radius: 8px !important;
+    }
+    #chatbot .user .message {
+        background: #1C1C1A !important;
+        color: #F7F6F3 !important;
+        max-width: 72% !important;
+    }
+    #chatbot .bot .message {
+        background: #F7F6F3 !important;
+        color: #1C1C1A !important;
+        border: 0.5px solid #DDDBD2 !important;
+    }
+
+    /* ── Input row ── */
+    #input-row {
+        padding: 20px 28px 24px !important;
+        border-top: 0.5px solid #DDDBD2;
+        background: #FFFFFF;
+    }
+    #msg-input textarea {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 14px !important;
+        color: #1C1C1A !important;
+        background: #F7F6F3 !important;
+        border: 0.5px solid #DDDBD2 !important;
+        border-radius: 8px !important;
+        padding: 12px 16px !important;
+        resize: none !important;
+        transition: border-color 0.15s !important;
+    }
+    #msg-input textarea:focus {
+        border-color: #1C1C1A !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+    #msg-input textarea::placeholder {
+        color: #A8A695 !important;
+    }
+    #send-btn {
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: #F7F6F3 !important;
+        background: #1C1C1A !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 10px 22px !important;
+        height: 44px !important;
+        align-self: flex-end !important;
+        cursor: pointer !important;
+        transition: opacity 0.15s !important;
+        letter-spacing: 0.01em !important;
+    }
+    #send-btn:hover { opacity: 0.82 !important; }
+    #send-btn:active { opacity: 0.65 !important; }
+    #send-btn:disabled { opacity: 0.35 !important; cursor: default !important; }
+
+    /* ── Example pills ── */
+    .examples-holder {
+        padding: 0 28px 20px !important;
+    }
+    .example-btn {
+        font-size: 12px !important;
+        color: #5F5E5A !important;
+        background: #F7F6F3 !important;
+        border: 0.5px solid #DDDBD2 !important;
+        border-radius: 20px !important;
+        padding: 5px 14px !important;
+        cursor: pointer !important;
+        transition: background 0.12s, border-color 0.12s !important;
+        white-space: nowrap !important;
+    }
+    .example-btn:hover {
+        background: #EEECD8 !important;
+        border-color: #C5C3B8 !important;
+    }
+
+    /* ── Voice tab ── */
+    #voice-header {
+        padding: 32px 40px 0;
+    }
+    #voice-title {
+        font-family: 'DM Serif Display', serif;
+        font-size: 22px;
+        font-weight: 400;
+        color: #1C1C1A;
+        margin: 0 0 4px;
+    }
+    #voice-sub {
+        font-size: 13px;
+        color: #7A7869;
+        margin: 0 0 28px;
+    }
+    #voice-body {
+        padding: 0 40px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+    .voice-card {
+        background: #FFFFFF;
+        border: 0.5px solid #DDDBD2;
+        border-radius: 10px;
+        padding: 20px 24px;
+    }
+    .voice-card-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #A8A695;
+        margin: 0 0 12px;
+    }
+    #voice-submit-btn {
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: #F7F6F3 !important;
+        background: #1C1C1A !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 11px 28px !important;
+        cursor: pointer !important;
+        transition: opacity 0.15s !important;
+        letter-spacing: 0.01em !important;
+    }
+    #voice-submit-btn:hover { opacity: 0.82 !important; }
+
+    /* ── Transcription + response fields ── */
+    #transcription-box textarea,
+    #response-box {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 14px !important;
+        color: #1C1C1A !important;
+        background: #F7F6F3 !important;
+        border: 0.5px solid #DDDBD2 !important;
+        border-radius: 8px !important;
+        padding: 14px 16px !important;
+        line-height: 1.7 !important;
+    }
+    """
+
+    # ── Sidebar HTML ──────────────────────────────────────────────────────────
+    sidebar_html = """
+    <div class="sidebar-label">Knowledge Base</div>
+
+    <div class="sidebar-doc">
+        <div class="sidebar-doc-icon"><span>SBC</span></div>
+        <div>
+            <div class="sidebar-doc-name">Summary of Benefits</div>
+            <div class="sidebar-doc-sub">Coverage &amp; Costs</div>
+        </div>
+    </div>
+
+    <div class="sidebar-doc">
+        <div class="sidebar-doc-icon"><span>SPD</span></div>
+        <div>
+            <div class="sidebar-doc-name">Plan Description</div>
+            <div class="sidebar-doc-sub">Eligibility &amp; Rules</div>
+        </div>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-stack-label">Powered By</div>
+    <div class="sidebar-stack-item">LangGraph Agent</div>
+    <div class="sidebar-stack-item">ColQwen2.5</div>
+    <div class="sidebar-stack-item">Qdrant Vector DB</div>
+
+    <div class="sidebar-footer">
+        <span class="status-dot"></span>
+        <span class="status-text">System ready</span>
+    </div>
     """
 
     with gr.Blocks(
         css=custom_css,
-        title="Voice + Text Benefits Assistant",
-        theme=gr.themes.Base(primary_hue="stone", neutral_hue="stone")
+        title="Healthcare Benefits Assistant",
+        theme=gr.themes.Base(
+            font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+            primary_hue="stone",
+            neutral_hue="stone",
+        ),
     ) as demo:
-        
+
+        # ── Global header ─────────────────────────────────────────────────────
         gr.HTML("""
-            <div id="main-title">Healthcare Benefits Voice Assistant</div>
-            <div style="text-align: center; color: #8a8070; margin-bottom: 20px;">
-                Speak or type your questions about SBC & SPD documents
+            <div id="app-header">
+                <p id="app-wordmark">Benefits Assistant</p>
+                <p id="app-tagline">Intelligent Q&amp;A over SBC &amp; SPD Documents</p>
             </div>
         """)
 
-        with gr.Tabs():
-            # ==================== TEXT CHAT TAB ====================
-            with gr.Tab("💬 Text Chat"):
-                with gr.Row(elem_classes=["app-shell"]):
-                    with gr.Column(elem_id="sidebar", scale=0, min_width=260):
-                        gr.HTML("<strong>Knowledge Base</strong>")
-                        gr.HTML("<p><small>SBC + SPD Documents via LangGraph Agent</small></p>")
-                        clear_btn = gr.Button("🗑 Clear Chat", size="sm")
-                        gr.HTML("""
-                            <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
-                                Powered by LangGraph • ColQwen2.5 • Qdrant
-                            </div>
-                        """)
+        with gr.Tabs(elem_classes=["tab-nav"]):
 
+            # ═══════════════════ TEXT CHAT TAB ═══════════════════════════════
+            with gr.Tab("Text Chat"):
+                with gr.Row(elem_classes=["layout-shell"]):
+
+                    # Sidebar
+                    with gr.Column(elem_id="sidebar", scale=0, min_width=240):
+                        gr.HTML(sidebar_html)
+                        clear_btn = gr.Button(
+                            "Clear conversation",
+                            elem_id="clear-btn",
+                            size="sm",
+                        )
+
+                    # Main chat column
                     with gr.Column(elem_id="chat-area", scale=1):
                         chatbot = gr.Chatbot(
+                            elem_id="chatbot",
                             type="messages",
-                            height=620,
+                            height=540,
                             bubble_full_width=False,
                             render_markdown=True,
+                            show_label=False,
                         )
-                        with gr.Row():
+
+                        with gr.Row(elem_id="input-row"):
                             msg = gr.Textbox(
-                                placeholder="Ask a question about your benefits plan...",
+                                placeholder="Ask about your benefits plan…",
                                 scale=8,
                                 lines=1,
                                 max_lines=4,
                                 autofocus=True,
+                                show_label=False,
+                                container=False,
+                                elem_id="msg-input",
                             )
-                            submit_btn = gr.Button("Send", variant="primary")
+                            submit_btn = gr.Button(
+                                "Send",
+                                variant="primary",
+                                scale=0,
+                                min_width=90,
+                                elem_id="send-btn",
+                            )
 
-                        gr.Examples(
-                            examples=[
-                                ["What is the deductible for this plan?"],
-                                ["What services are covered under preventive care?"],
-                                ["What is the out-of-pocket maximum?"],
-                                ["Tell me about eligibility rules."],
-                            ],
-                            inputs=[msg],
-                            label="Example Queries",
-                        )
+                        with gr.Row(elem_classes=["examples-holder"]):
+                            gr.Examples(
+                                examples=[
+                                    ["What is the deductible for this plan?"],
+                                    ["What services are covered under preventive care?"],
+                                    ["What is the out-of-pocket maximum?"],
+                                    ["Tell me about eligibility rules."],
+                                ],
+                                inputs=[msg],
+                                label=None,
+                                elem_classes=["example-btn"],
+                            )
 
                 # Text Chat Events
                 msg.submit(
-                    user_turn, inputs=[msg, chatbot], outputs=[chatbot, msg, msg, submit_btn]
+                    user_turn,
+                    inputs=[msg, chatbot],
+                    outputs=[chatbot, msg, msg, submit_btn],
                 ).then(
-                    bot_turn, inputs=[chatbot], outputs=[chatbot, msg, submit_btn]
+                    bot_turn,
+                    inputs=[chatbot],
+                    outputs=[chatbot, msg, submit_btn],
                 )
 
                 submit_btn.click(
-                    user_turn, inputs=[msg, chatbot], outputs=[chatbot, msg, msg, submit_btn]
+                    user_turn,
+                    inputs=[msg, chatbot],
+                    outputs=[chatbot, msg, msg, submit_btn],
                 ).then(
-                    bot_turn, inputs=[chatbot], outputs=[chatbot, msg, submit_btn]
+                    bot_turn,
+                    inputs=[chatbot],
+                    outputs=[chatbot, msg, submit_btn],
                 )
 
                 clear_btn.click(
                     lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
-                    None, [chatbot, msg, submit_btn]
+                    None,
+                    [chatbot, msg, submit_btn],
                 )
-            
 
-import sys
-import gc
-import os
-import json
-from datetime import datetime
-import torch
-import gradio as gr
-import time
+            # ═══════════════════ VOICE TAB ═══════════════════════════════════
+            with gr.Tab("Voice Assistant"):
+                gr.HTML("""
+                    <div id="voice-header">
+                        <p id="voice-title">Voice-Enabled Assistant</p>
+                        <p id="voice-sub">
+                            Record your question — it will be transcribed, answered,
+                            and read back to you.
+                        </p>
+                    </div>
+                """)
 
-from src.utils import clear_page_cache
-from src.indexer import MultimodalIndexer
-from src.retriever import MultimodalRetriever
-from src.generator import MultimodalGenerator
-from src.agent import run_agent
-from src.voice import get_voice_interface
+                with gr.Column(elem_id="voice-body"):
 
-HISTORY_FILE = "chat_history.json"
-
-
-def save_to_history(query, source_input, answer):
-    history_data = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                history_data = json.load(f)
-        except Exception:
-            history_data = []
-    
-    history_data.append({
-        "timestamp": datetime.now().isoformat(),
-        "query": query,
-        "source": source_input,
-        "answer": answer,
-    })
-    
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history_data, f, indent=2, ensure_ascii=False)
-
-
-def aggressive_cleanup():
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-def main(force_reindex=False):
-    print("\nInitializing Multimodal Voice RAG System...\n")
-    
-    # indexer = MultimodalIndexer(force_recreate=force_reindex)
-    # retriever = MultimodalRetriever(indexer)
-    # generator = MultimodalGenerator()
-
-    # print("Warming up retrieval model...")
-    # _ = retriever._extract_text_embedding("warmup query")
-    # print("System Ready!\n")
-
-    # if force_reindex or indexer.is_collection_empty():
-    #     print("Indexing documents...\n")
-    #     indexer.index_all_data("data")
-    #     print("Indexing completed!\n")
-    # else:
-    #     print("Existing index found. Skipping indexing.\n")
-
-    # source_map = {
-    #     "Both Documents": None,
-    #     "SBC": "data/sbc.pdf",
-    #     "SPD": "data/spd.pdf",
-    # }
-    print("Warming up Agent and retrieval models...")
-
-    # Warmup both tools via the agent
-    try:
-        _ = run_agent("warmup query for initialization")
-    except Exception as e:
-        print(f"Warning during warmup: {e}")
-    print("System Ready!\n")
-
-    voice_interface = get_voice_interface(run_agent)
-
-    # ── User Turn: Show message immediately + thinking indicator ─────────────
-    def user_turn(message, history):
-        if not message or not message.strip():
-            return history, "", gr.update(interactive=False), gr.update(interactive=False)
-        
-        # history = history or []
-        # history = history + [
-        #     {"role": "user", "content": message.strip()},
-        #     {"role": "assistant", "content": "Thinking..."}
-        # ]
-        history = history or []
-        history.append([message.strip(), "Thinking..."])
-        
-        return history, "", gr.update(interactive=False), gr.update(interactive=False)
-
-    # ── Bot Turn: Generate real answer using LangGraph Agent ─────────────────
-    def bot_turn(history):
-        if not history:
-            return history, gr.update(interactive=True), gr.update(interactive=True)
-        
-        query = history[-1][0]
-        
-        try:
-            bot_response = run_agent(query)
-            save_to_history(query, "Agent (SBC/SPD)", bot_response)
-        except Exception as e:
-            bot_response = f" **Error while generating response:**\n\n{str(e)}"
-        
-        # Replace thinking message with real answer
-        # history[-1] = {"role": "assistant", "content": bot_response}
-        history[-1][1] = bot_response        
-        aggressive_cleanup()
-        clear_page_cache()
-        return history, gr.update(interactive=True), gr.update(interactive=True)
-    
-    def speak_stream(self, text: str):
-        """Generator that yields audio chunks for Gradio streaming"""
-        start = time.time()
-        
-        try:
-            # Piper supports raw streaming synthesis
-            for audio_bytes in self.voice.synthesize_stream_raw(
-                text,
-                speaker_id=None,
-                length_scale=1.0,
-                noise_scale=0.667,
-                noise_w=0.8
-            ):
-                yield audio_bytes  # Yield raw PCM chunks
-                
-            print(f"TTS Streaming completed in {time.time() - start:.2f}s")
-            
-        except Exception as e:
-            print(f"TTS Streaming Error: {e}")
-            # Fallback: yield silent audio or error
-            yield b''
-
-        # ── Voice Functions ─────────────────────────────────────────────────
-    # def voice_pipeline(audio):
-    #     """Full voice → agent → voice response"""
-    #     if audio is None:
-    #         return None, "No audio received. Please record again."
-        
-    #     try:
-    #         total_start = time.time()
-    #         pipeline_start = time.time()
-    #         audio_path, result_text = voice_interface.voice_pipeline(audio)
-    #         pipeline_latency = time.time() - pipeline_start
-
-    #         total_latency = time.time() - total_start
-
-    #         result_text += (
-    #             f"\n\n Pipeline Latency: {pipeline_latency:.2f}s"
-    #             f"\n Total Latency: {total_latency:.2f}s"
-    #         )
-    #         return audio_path, result_text
-    #     except Exception as e:
-    #         return None, f"Error in voice pipeline: {str(e)}"
-
-
-    # ── Custom CSS ─────────────
-#     custom_css = """
-#     @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
-    
-#     .gradio-container {
-#         font-family: 'Lato', sans-serif !important;
-#         background: #f5f0e8 !important;
-#     }
-#     footer { display: none !important; }
-
-#     #main-title {
-#         text-align: center;
-#         font-size: 28px;
-#         font-weight: 700;
-#         color: #2c2a26;
-#         margin-bottom: 8px;
-#         letter-spacing: -0.5px;
-#     }
-#     #main-subtitle {
-#         text-align: center;
-#         font-size: 15px;
-#         color: #8a8070;
-#         margin-bottom: 20px;
-#     }
-
-#     /* Sidebar & Chat Layout */
-#     .app-shell {
-#         display: flex;
-#         min-height: 85vh;
-#         overflow: hidden;
-#         background: #f5f0e8;
-#         border-radius: 12px;
-#         box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-#     }
-#     #sidebar { 
-#         width: 260px; 
-#         min-width: 260px; 
-#         background: #ede8de; 
-#         border-right: 1px solid #d8d0c0; 
-#         padding: 24px 20px;
-#         display: flex;
-#         flex-direction: column;
-#         gap: 20px;
-#     }
-#     #chat-area {
-#         flex: 1;
-#         display: flex;
-#         flex-direction: column;
-#         background: #faf8f4;
-#     }
-#     #chatbot {
-#         background: transparent !important;
-#         border: none !important;
-#         flex: 1;
-#     }
-#     """
-
-#     with gr.Blocks(
-#         css=custom_css,
-#         title="Multimodal RAG Assistant",
-#         theme=gr.themes.Base(primary_hue="stone", neutral_hue="stone")
-#     ) as demo:
-        
-#         gr.HTML("""
-#             <div id="main-title">Multimodal RAG Assistant</div>
-#             <div id="main-subtitle">Intelligent Document Q&A over SBC & SPD using LangGraph Agent</div>
-#         """)
-
-#         with gr.Row(elem_classes=["app-shell"]):
-#             # Sidebar
-#             with gr.Column(elem_id="sidebar", scale=0, min_width=260):
-#                 gr.HTML('<strong>Knowledge Base</strong>')
-#                 gr.HTML('<p><small>SBC + SPD Documents</small></p>')
-                
-#                 gr.HTML('<strong>Actions</strong>')
-#                 clear_btn = gr.Button("🗑 Clear Chat", elem_id="clear-btn", size="sm")
-
-#                 gr.HTML("""
-#                     <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
-#                         Ready • LangGraph Agent • Qdrant + ColQwen2.5
-#                     </div>
-#                 """)
-
-#             # Main Chat Area
-#             with gr.Column(elem_id="chat-area", scale=1):
-#                 chatbot = gr.Chatbot(
-#                     elem_id="chatbot",
-#                     type="messages",
-#                     height=620,
-#                     bubble_full_width=False,
-#                     show_label=False,
-#                     render_markdown=True,
-#                 )
-
-#                 with gr.Row():
-#                     msg = gr.Textbox(
-#                         placeholder="Ask a question about your benefits plan...",
-#                         scale=8,
-#                         container=False,
-#                         lines=1,
-#                         max_lines=4,
-#                         autofocus=True,
-#                         elem_id="msg-box",
-#                     )
-#                     submit_btn = gr.Button("Send", variant="primary", scale=1, min_width=100)
-
-#                 gr.Examples(
-#                     examples=[
-#                         ["What is the deductible for this plan?"],
-#                         ["What services are covered under preventive care?"],
-#                         ["What is the out-of-pocket maximum?"],
-#                         ["Tell me about eligibility and enrollment rules."],
-#                     ],
-#                     inputs=[msg],
-#                     label="Example Queries",
-#                     cache_examples=False
-#                 )
-        
-
-#         # Event Handling
-#         msg.submit(
-#             user_turn,
-#             inputs=[msg, chatbot],
-#             outputs=[chatbot, msg, msg, submit_btn],
-#             queue=False
-#         ).then(
-#             bot_turn,
-#             inputs=[chatbot],
-#             outputs=[chatbot, msg, submit_btn]
-#         )
-
-#         submit_btn.click(
-#             user_turn,
-#             inputs=[msg, chatbot],
-#             outputs=[chatbot, msg, msg, submit_btn],
-#             queue=False
-#         ).then(
-#             bot_turn,
-#             inputs=[chatbot],
-#             outputs=[chatbot, msg, submit_btn]
-#         )
-
-#         clear_btn.click(
-#             lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
-#             None, 
-#             [chatbot, msg, submit_btn]
-#         )
-
-#     demo.launch(
-#         share=True,
-#         server_name="0.0.0.0",
-#         server_port=7860,
-#         show_error=True,
-#     )
-
-
-# if __name__ == "__main__":
-#     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-#     main(force_reindex)
-
-# ── Custom CSS ───────────────────────────────────────────────────────
-    custom_css = """
-    @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
-    
-    .gradio-container {
-        font-family: 'Lato', sans-serif !important;
-        background: #f5f0e8 !important;
-    }
-    footer { display: none !important; }
-
-    #main-title {
-        text-align: center;
-        font-size: 28px;
-        font-weight: 700;
-        color: #2c2a26;
-        margin-bottom: 8px;
-        letter-spacing: -0.5px;
-    }
-    """
-
-    with gr.Blocks(
-        css=custom_css,
-        title="Voice + Text Benefits Assistant",
-        theme=gr.themes.Base(primary_hue="stone", neutral_hue="stone")
-    ) as demo:
-        
-        gr.HTML("""
-            <div id="main-title">Healthcare Benefits Voice Assistant</div>
-            <div style="text-align: center; color: #8a8070; margin-bottom: 20px;">
-                Speak or type your questions about SBC & SPD documents
-            </div>
-        """)
-
-        with gr.Tabs():
-            # ==================== TEXT CHAT TAB ====================
-            with gr.Tab("💬 Text Chat"):
-                with gr.Row(elem_classes=["app-shell"]):
-                    with gr.Column(elem_id="sidebar", scale=0, min_width=260):
-                        gr.HTML("<strong>Knowledge Base</strong>")
-                        gr.HTML("<p><small>SBC + SPD Documents via LangGraph Agent</small></p>")
-                        clear_btn = gr.Button("🗑 Clear Chat", size="sm")
-                        gr.HTML("""
-                            <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
-                                Powered by LangGraph • ColQwen2.5 • Qdrant
-                            </div>
-                        """)
-
-                    with gr.Column(elem_id="chat-area", scale=1):
-                        chatbot = gr.Chatbot(
-                            type="messages",
-                            height=620,
-                            bubble_full_width=False,
-                            render_markdown=True,
+                    with gr.Column(elem_classes=["voice-card"]):
+                        gr.HTML('<div class="voice-card-label">Record Question</div>')
+                        audio_input = gr.Audio(
+                            sources=["microphone", "upload"],
+                            type="filepath",
+                            label=None,
+                            show_label=False,
+                            waveform_options=gr.WaveformOptions(
+                                waveform_color="#1C1C1A"
+                            ),
                         )
-                        with gr.Row():
-                            msg = gr.Textbox(
-                                placeholder="Ask a question about your benefits plan...",
-                                scale=8,
-                                lines=1,
-                                max_lines=4,
-                                autofocus=True,
-                            )
-                            submit_btn = gr.Button("Send", variant="primary")
-
-                        gr.Examples(
-                            examples=[
-                                ["What is the deductible for this plan?"],
-                                ["What services are covered under preventive care?"],
-                                ["What is the out-of-pocket maximum?"],
-                                ["Tell me about eligibility rules."],
-                            ],
-                            inputs=[msg],
-                            label="Example Queries",
+                        voice_submit = gr.Button(
+                            "Process voice query",
+                            variant="primary",
+                            elem_id="voice-submit-btn",
                         )
 
-                # Text Chat Events
-                msg.submit(
-                    user_turn, inputs=[msg, chatbot], outputs=[chatbot, msg, msg, submit_btn]
-                ).then(
-                    bot_turn, inputs=[chatbot], outputs=[chatbot, msg, submit_btn]
-                )
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            with gr.Column(elem_classes=["voice-card"]):
+                                gr.HTML('<div class="voice-card-label">Transcription</div>')
+                                transcription = gr.Textbox(
+                                    label=None,
+                                    show_label=False,
+                                    placeholder="Your spoken words appear here…",
+                                    lines=3,
+                                    interactive=False,
+                                    elem_id="transcription-box",
+                                )
 
-                submit_btn.click(
-                    user_turn, inputs=[msg, chatbot], outputs=[chatbot, msg, msg, submit_btn]
-                ).then(
-                    bot_turn, inputs=[chatbot], outputs=[chatbot, msg, submit_btn]
-                )
+                        with gr.Column(scale=2):
+                            with gr.Column(elem_classes=["voice-card"]):
+                                gr.HTML('<div class="voice-card-label">Agent Response</div>')
+                                voice_output_text = gr.Markdown(
+                                    label=None,
+                                    elem_id="response-box",
+                                )
 
-                clear_btn.click(
-                    lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
-                    None, [chatbot, msg, submit_btn]
-                )
-
-            # ==================== VOICE TAB ====================
-            with gr.Tab("🎤 Voice Assistant"):
-                gr.HTML("<h2>🎙️ Voice-Enabled Benefits Assistant (Alexa-like)</h2>")
-                gr.Markdown("**Speak → Instant Transcription → Streaming Spoken Answer**")
-
-                with gr.Row():
-                    audio_input = gr.Audio(
-                        sources=["microphone", "upload"],
-                        type="filepath",
-                        label="🎙️ Record Your Question",
-                        waveform_options=gr.WaveformOptions(waveform_color="#4f46e5")
-                    )
-
-                with gr.Row():
-                    voice_submit = gr.Button("🔊 Send Voice Query", variant="primary", size="large")
-
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        transcription = gr.Textbox(
-                            label="📝 Transcription",
-                            placeholder="Your spoken words appear here...",
-                            lines=3,
-                            interactive=False
+                    with gr.Column(elem_classes=["voice-card"]):
+                        gr.HTML('<div class="voice-card-label">Spoken Response</div>')
+                        voice_output_audio = gr.Audio(
+                            label=None,
+                            show_label=False,
+                            streaming=True,
+                            autoplay=True,
+                            interactive=False,
+                            show_download_button=True,
                         )
-                    with gr.Column(scale=2):
-                        voice_output_text = gr.Markdown(label="🤖 Agent Response")
-
-                with gr.Row():
-                    voice_output_audio = gr.Audio(
-                        label="🔊 Streaming Spoken Response",
-                        streaming=True,      # ← Key for real-time feel
-                        autoplay=True,
-                        interactive=False,
-                        show_download_button=True
-                    )
-
-                def streaming_voice_pipeline(audio):
-                    if audio is None:
-                        return None, "No audio received.", "**Please record something.**"
-
-                    try:
-                        voice_interface = get_voice_interface(run_agent)
-
-                        # 1. Transcribe immediately
-                        query = voice_interface.transcribe_audio(audio)
-                        if not query or not query.strip():
-                            return None, "Could not understand audio.", "**Try speaking more clearly.**"
-
-                        transcription_text = f"**You said:** {query}"
-
-                        # 2. Get full agent response (this is the bottleneck)
-                        answer = run_agent(query)
-
-                        # 3. Stream the speech
-                        final_text = f"**{answer}**"
-
-                        for chunk in voice_interface.speak_stream(answer):
-                            yield chunk, transcription_text, final_text
-
-                        # Return generator for streaming audio
-                        # audio_generator = voice_interface.speak_stream(answer)
-
-                        # return audio_generator, transcription_text, final_text
-
-                    except Exception as e:
-                        print(f"Voice Error: {e}")
-                        return None, f"Error: {str(e)}", "**Processing failed.**"
 
                 voice_submit.click(
                     fn=streaming_voice_pipeline,
                     inputs=[audio_input],
-                    outputs=[voice_output_audio, transcription, voice_output_text]
+                    outputs=[voice_output_audio, transcription, voice_output_text],
                 )
 
-    demo.launch(
-        share=True,
-        server_name="0.0.0.0",
-        server_port=7860,
-        show_error=True,
-    )
+        demo.launch(
+            share=True,
+            server_name="0.0.0.0",
+            server_port=7860,
+            show_error=True,
+        )
 
 
 if __name__ == "__main__":
     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-    main(force_reindex) 
+    main(force_reindex)
