@@ -546,7 +546,6 @@ def main(force_reindex=False):
                                 ],
                                 inputs=[msg],
                                 label=None,
-                                elem_classes=["example-btn"],
                             )
 
                 # Text Chat Events
