@@ -84,11 +84,13 @@ def main(force_reindex=False):
         if not message or not message.strip():
             return history, "", gr.update(interactive=False), gr.update(interactive=False)
         
+        # history = history or []
+        # history = history + [
+        #     {"role": "user", "content": message.strip()},
+        #     {"role": "assistant", "content": "Thinking..."}
+        # ]
         history = history or []
-        history = history + [
-            {"role": "user", "content": message.strip()},
-            {"role": "assistant", "content": "Thinking..."}
-        ]
+        history.append([message.strip(), "Thinking..."])
         
         return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
@@ -97,7 +99,7 @@ def main(force_reindex=False):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
         
-        query = history[-2]["content"]
+        query = history[-1][0]
         
         try:
             bot_response = run_agent(query)
@@ -106,8 +108,8 @@ def main(force_reindex=False):
             bot_response = f" **Error while generating response:**\n\n{str(e)}"
         
         # Replace thinking message with real answer
-        history[-1] = {"role": "assistant", "content": bot_response}
-        
+        # history[-1] = {"role": "assistant", "content": bot_response}
+        history[-1][1] = bot_response        
         aggressive_cleanup()
         clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
