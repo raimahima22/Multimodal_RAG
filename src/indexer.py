@@ -20,7 +20,6 @@ import shutil
 import pytesseract
 from src.utils import pdf_to_images
 import re
-import os
 import sys
 from transformers.utils.import_utils import is_flash_attn_2_available
 from qdrant_client import QdrantClient
@@ -34,8 +33,6 @@ from qdrant_client.models import (
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from transformers import AutoProcessor
 
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# qdrant_db_path = os.path.join(BASE_DIR, "final_qdrant_db")
 
 def aggressive_cleanup():
     """
@@ -146,7 +143,6 @@ class MultimodalIndexer:
         print("Model and processor loaded successfully.")
 
         self.local_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
-        # self.local_client = QdrantClient(path=qdrant_db_path)
 
         if force_recreate:
             self._recreate_collection()
