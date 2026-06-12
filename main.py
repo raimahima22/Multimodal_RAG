@@ -346,10 +346,10 @@ def main(force_reindex=False):
 
                     with gr.Column(elem_id="chat-area", scale=1):
                         chatbot = gr.Chatbot(
-                            # type="messages",
-                            # height=620,
-                            # bubble_full_width=False,
-                            # render_markdown=True,
+                            type="messages",
+                            height=620,
+                            bubble_full_width=False,
+                            render_markdown=True,
                         )
                         with gr.Row():
                             msg = gr.Textbox(
@@ -410,11 +410,11 @@ def main(force_reindex=False):
                     with gr.Column(scale=1):
                         transcription = gr.Textbox(
                             label="📝 Transcription",
-                            placeholder="Your spoken words will appear here...",
-                            lines=2,
+                            placeholder="What you said will appear here...",
+                            lines=3,
                             interactive=False
                         )
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=2):
                         voice_output_text = gr.Markdown(
                             label="🤖 Agent Response"
                         )
@@ -455,7 +455,7 @@ def main(force_reindex=False):
                         total_latency = time.time() - total_start
 
                         # Enhanced response text
-                        final_text = f"""
+                        final_response = f"""
 **Answer:**
 
 {answer}
@@ -466,7 +466,7 @@ def main(force_reindex=False):
 *Total: {total_latency:.2f}s*
 """
 
-                        return audio_path, transcription_text, final_text, answer
+                        return audio_path, transcription_text, final_response
 
                     except Exception as e:
                         error_msg = f"Error: {str(e)}"
@@ -475,7 +475,7 @@ def main(force_reindex=False):
                 voice_submit.click(
                     fn=improved_voice_pipeline,
                     inputs=[audio_input],
-                    outputs=[voice_output_audio, transcription, voice_output_text, None]
+                    outputs=[voice_output_audio, transcription, voice_output_text]
                 )
 
     demo.launch(
