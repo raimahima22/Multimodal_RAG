@@ -9,14 +9,14 @@ from faster_whisper import WhisperModel
 from piper import PiperVoice  # NEW (instead of TTS)
 from soundfile as sf
 
-# MODEL_PATH = os.path.join(
-#     "/content/drive/MyDrive/piper_models",
-#     "en_US-amy-medium.onnx"
-# )
 MODEL_PATH = os.path.join(
-    "models",
+    "/content/drive/MyDrive/piper_models",
     "en_US-amy-medium.onnx"
 )
+# MODEL_PATH = os.path.join(
+#     "models",
+#     "en_US-amy-medium.onnx"
+# )
 
 class VoiceInterface:
     def __init__(self, agent_func):
