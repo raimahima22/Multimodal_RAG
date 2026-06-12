@@ -79,6 +79,9 @@ class VoiceInterface:
             output_path = f"outputs/tts_{uuid.uuid4().hex}.wav"
 
             result = self.voice.synthesize(text)
+            first_item = next(result)
+            print(type(first_item))
+            print(first_item)
 
             # CASE 1: (audio, sample_rate)
 
