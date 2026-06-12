@@ -1,202 +1,282 @@
+
+
 import sys
 import gc
 import os
 import json
-import warnings
 from datetime import datetime
 import torch
-import time
-import logging
-
-import streamlit as st
-
-# Suppress common warnings
-warnings.filterwarnings("ignore", message=".*__path__.*image_processing_sam.*")
-warnings.filterwarnings("ignore", category=UserWarning)
+import gradio as gr
 
 from src.utils import clear_page_cache
+from src.indexer import MultimodalIndexer
+from src.retriever import MultimodalRetriever
+from src.generator import MultimodalGenerator
 from src.agent import run_agent
-from src.voice import get_voice_interface
-
-# ====================== CONFIG ======================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from src.agent import get_voice_interface
 
 HISTORY_FILE = "chat_history.json"
 
-st.set_page_config(
-    page_title="Healthcare Benefits Assistant",
-    page_icon="🩺",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
-# ====================== CUSTOM CSS ======================
-st.markdown("""
-<style>
-    .main {background-color: #f8fafc;}
-    .block-container {padding-top: 2rem;}
-    .title {
-        font-size: 2.6rem;
-        font-weight: 700;
-        color: #1e40af;
-        text-align: center;
-        margin-bottom: 0.4rem;
-    }
-    .subtitle {
-        text-align: center;
-        color: #475569;
-        font-size: 1.15rem;
-        margin-bottom: 2rem;
-    }
-    .stChatMessage {border-radius: 12px; padding: 14px 18px;}
-    .loading-container {
-        text-align: center;
-        padding: 4rem 2rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ====================== UTILITIES ======================
-def save_to_history(query: str, source: str, answer: str):
-    history = []
+def save_to_history(query, source_input, answer):
+    history_data = []
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except:
-            pass
-
-    history.append({
+                history_data = json.load(f)
+        except Exception:
+            history_data = []
+    
+    history_data.append({
         "timestamp": datetime.now().isoformat(),
         "query": query,
-        "source": source,
+        "source": source_input,
         "answer": answer,
     })
-
-    try:
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history[-100:], f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"History save failed: {e}")
+    
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history_data, f, indent=2, ensure_ascii=False)
 
 
 def aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    clear_page_cache()
 
 
-# ====================== INITIALIZATION ======================
-@st.cache_resource(show_spinner=False)
-def initialize_system():
-    """One-time heavy initialization with clear feedback"""
-    status = st.empty()
-    status.info("🚀 Initializing AI Models... This may take 30-90 seconds on first run.")
+def main(force_reindex=False):
+    print("\nInitializing Multimodal Voice RAG System...\n")
     
+    # indexer = MultimodalIndexer(force_recreate=force_reindex)
+    # retriever = MultimodalRetriever(indexer)
+    # generator = MultimodalGenerator()
+
+    # print("Warming up retrieval model...")
+    # _ = retriever._extract_text_embedding("warmup query")
+    # print("System Ready!\n")
+
+    # if force_reindex or indexer.is_collection_empty():
+    #     print("Indexing documents...\n")
+    #     indexer.index_all_data("data")
+    #     print("Indexing completed!\n")
+    # else:
+    #     print("Existing index found. Skipping indexing.\n")
+
+    # source_map = {
+    #     "Both Documents": None,
+    #     "SBC": "data/sbc.pdf",
+    #     "SPD": "data/spd.pdf",
+    # }
+    print("Warming up Agent and retrieval models...")
+    # Warmup both tools via the agent
     try:
-        # Warmup Agent
-        status.info("🔄 Warming up LangGraph Agent...")
-        run_agent("warmup query")
-        
-        # Load Voice Interface (contains Whisper + Piper)
-        status.info("🎙 Loading Voice Models (STT + TTS)...")
-        voice_interface = get_voice_interface(run_agent)
-        
-        status.success("✅ System Ready!")
-        time.sleep(1)
-        status.empty()
-        
-        return voice_interface
+        _ = run_agent("warmup query for initialization")
     except Exception as e:
-        st.error(f"Initialization failed: {e}")
-        st.stop()
+        print(f"Warning during warmup: {e}")
+    print("System Ready!\n")
 
-
-# ====================== MAIN APP ======================
-def main():
-    # Force initialization before showing UI
-    if "voice_interface" not in st.session_state:
-        with st.spinner(""):
-            st.session_state.voice_interface = initialize_system()
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # ====================== SIDEBAR ======================
-    with st.sidebar:
-        st.title("Benefits Assistant")
-        st.markdown("**SBC + SPD Plan Assistant**")
+    # ── User Turn: Show message immediately + thinking indicator ─────────────
+    def user_turn(message, history):
+        if not message or not message.strip():
+            return history, "", gr.update(interactive=False), gr.update(interactive=False)
         
-        st.divider()
-        st.markdown("### Knowledge Base")
-        st.info("""
-        **SBC** — Quick benefits, deductibles, copays  
-        **SPD** — Rules, eligibility, exclusions, procedures
+        history = history or []
+        history = history + [
+            {"role": "user", "content": message.strip()},
+            {"role": "assistant", "content": "Thinking..."}
+        ]
+        
+        return history, "", gr.update(interactive=False), gr.update(interactive=False)
+
+    # ── Bot Turn: Generate real answer using LangGraph Agent ─────────────────
+    def bot_turn(history):
+        if not history:
+            return history, gr.update(interactive=True), gr.update(interactive=True)
+        
+        query = history[-2]["content"]
+        
+        try:
+            bot_response = run_agent(query)
+            save_to_history(query, "Agent (SBC/SPD)", bot_response)
+        except Exception as e:
+            bot_response = f" **Error while generating response:**\n\n{str(e)}"
+        
+        # Replace thinking message with real answer
+        history[-1] = {"role": "assistant", "content": bot_response}
+        
+        aggressive_cleanup()
+        clear_page_cache()
+        return history, gr.update(interactive=True), gr.update(interactive=True)
+
+        # ── Voice Functions ─────────────────────────────────────────────────
+    def voice_pipeline(audio):
+        """Full voice → agent → voice response"""
+        if audio is None:
+            return None, "No audio received. Please record again."
+        
+        try:
+            audio_path, result_text = voice_iface.voice_pipeline(audio)
+            return audio_path, result_text
+        except Exception as e:
+            return None, f"Error in voice pipeline: {str(e)}"
+
+
+    # ── Custom CSS ─────────────
+    custom_css = """
+    @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Source+Code+Pro:wght@400;500&display=swap');
+    
+    .gradio-container {
+        font-family: 'Lato', sans-serif !important;
+        background: #f5f0e8 !important;
+    }
+    footer { display: none !important; }
+
+    #main-title {
+        text-align: center;
+        font-size: 28px;
+        font-weight: 700;
+        color: #2c2a26;
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
+    }
+    #main-subtitle {
+        text-align: center;
+        font-size: 15px;
+        color: #8a8070;
+        margin-bottom: 20px;
+    }
+
+    /* Sidebar & Chat Layout */
+    .app-shell {
+        display: flex;
+        min-height: 85vh;
+        overflow: hidden;
+        background: #f5f0e8;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    #sidebar { 
+        width: 260px; 
+        min-width: 260px; 
+        background: #ede8de; 
+        border-right: 1px solid #d8d0c0; 
+        padding: 24px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+    #chat-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: #faf8f4;
+    }
+    #chatbot {
+        background: transparent !important;
+        border: none !important;
+        flex: 1;
+    }
+    """
+
+    with gr.Blocks(
+        css=custom_css,
+        title="Multimodal RAG Assistant",
+        theme=gr.themes.Base(primary_hue="stone", neutral_hue="stone")
+    ) as demo:
+        
+        gr.HTML("""
+            <div id="main-title">Multimodal RAG Assistant</div>
+            <div id="main-subtitle">Intelligent Document Q&A over SBC & SPD using LangGraph Agent</div>
         """)
+
+        with gr.Row(elem_classes=["app-shell"]):
+            # Sidebar
+            with gr.Column(elem_id="sidebar", scale=0, min_width=260):
+                gr.HTML('<strong>Knowledge Base</strong>')
+                gr.HTML('<p><small>SBC + SPD Documents</small></p>')
+                
+                gr.HTML('<strong>Actions</strong>')
+                clear_btn = gr.Button("🗑 Clear Chat", elem_id="clear-btn", size="sm")
+
+                gr.HTML("""
+                    <div style="margin-top: auto; font-size: 0.85em; color: #8a8070;">
+                        Ready • LangGraph Agent • Qdrant + ColQwen2.5
+                    </div>
+                """)
+
+            # Main Chat Area
+            with gr.Column(elem_id="chat-area", scale=1):
+                chatbot = gr.Chatbot(
+                    elem_id="chatbot",
+                    type="messages",
+                    height=620,
+                    bubble_full_width=False,
+                    show_label=False,
+                    render_markdown=True,
+                )
+
+                with gr.Row():
+                    msg = gr.Textbox(
+                        placeholder="Ask a question about your benefits plan...",
+                        scale=8,
+                        container=False,
+                        lines=1,
+                        max_lines=4,
+                        autofocus=True,
+                        elem_id="msg-box",
+                    )
+                    submit_btn = gr.Button("Send", variant="primary", scale=1, min_width=100)
+
+                gr.Examples(
+                    examples=[
+                        ["What is the deductible for this plan?"],
+                        ["What services are covered under preventive care?"],
+                        ["What is the out-of-pocket maximum?"],
+                        ["Tell me about eligibility and enrollment rules."],
+                    ],
+                    inputs=[msg],
+                    label="Example Queries",
+                    cache_examples=False
+                )
         
-        st.divider()
-        if st.button("Clear Chat History", use_container_width=True):
-            st.session_state.messages = []
-            st.rerun()
-        
-        st.caption("LangGraph • ColQwen2.5 • Qdrant")
 
-    # ====================== HEADER ======================
-    st.markdown('<h1 class="title">Healthcare Benefits Assistant</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Instant answers from your plan documents</p>', unsafe_allow_html=True)
+        # Event Handling
+        msg.submit(
+            user_turn,
+            inputs=[msg, chatbot],
+            outputs=[chatbot, msg, msg, submit_btn],
+            queue=False
+        ).then(
+            bot_turn,
+            inputs=[chatbot],
+            outputs=[chatbot, msg, submit_btn]
+        )
 
-    tab1, tab2 = st.tabs(["Text Chat", "Voice Assistant"])
+        submit_btn.click(
+            user_turn,
+            inputs=[msg, chatbot],
+            outputs=[chatbot, msg, msg, submit_btn],
+            queue=False
+        ).then(
+            bot_turn,
+            inputs=[chatbot],
+            outputs=[chatbot, msg, submit_btn]
+        )
 
-    # ====================== TEXT CHAT ======================
-    with tab1:
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        clear_btn.click(
+            lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
+            None, 
+            [chatbot, msg, submit_btn]
+        )
 
-        if prompt := st.chat_input("Ask about your benefits plan..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Searching documents..."):
-                    try:
-                        response = run_agent(prompt)
-                        st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                        save_to_history(prompt, "Agent (SBC/SPD)", response)
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-
-            aggressive_cleanup()
-
-    # ====================== VOICE TAB ======================
-    with tab2:
-        st.markdown("### Voice Assistant")
-        st.markdown("Record your question for spoken + text response.")
-
-        audio_file = st.audio_input("Record your question")
-
-        if st.button("Send Voice Query", type="primary", use_container_width=True):
-            if audio_file:
-                with st.spinner("Transcribing • Thinking • Speaking..."):
-                    try:
-                        audio_path, result_text = st.session_state.voice_interface.voice_pipeline(audio_file)
-                        st.success("**You said:** " + (result_text.split("\n\n")[0] if "\n\n" in result_text else result_text))
-                        st.audio(audio_path, format="audio/wav", autoplay=True)
-
-                        st.session_state.messages.append({"role": "user", "content": "🎤 Voice Input"})
-                        st.session_state.messages.append({"role": "assistant", "content": result_text})
-                        save_to_history("Voice Input", "Agent (SBC/SPD)", result_text)
-                    except Exception as e:
-                        st.error(f"Voice error: {e}")
-            else:
-                st.warning("Please record audio first.")
-
-    st.caption("Confidential • Internal Healthcare Benefits Tool")
+    demo.launch(
+        share=True,
+        server_name="0.0.0.0",
+        server_port=7860,
+        show_error=True,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
+    main(force_reindex)
