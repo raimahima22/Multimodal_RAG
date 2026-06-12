@@ -7,16 +7,16 @@ import os
 
 from faster_whisper import WhisperModel
 from piper import PiperVoice  # NEW (instead of TTS)
+from soundfile as sf
 
-
-MODEL_PATH = os.path.join(
-    "/content/drive/MyDrive/piper_models",
-    "en_US-amy-medium.onnx"
-)
 # MODEL_PATH = os.path.join(
-#     "models",
+#     "/content/drive/MyDrive/piper_models",
 #     "en_US-amy-medium.onnx"
 # )
+MODEL_PATH = os.path.join(
+    "models",
+    "en_US-amy-medium.onnx"
+)
 
 class VoiceInterface:
     def __init__(self, agent_func):
@@ -115,7 +115,7 @@ class VoiceInterface:
 
     def speak_to_file(self, text: str, output_path="output.wav"):
         try:
-            audio = self.tts_engine.synthesize(
+            audio = self.voice.synthesize(
                 text,
                 speaker_id=None,
                 length_scale=1.0,
