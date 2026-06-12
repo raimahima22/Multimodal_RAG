@@ -13,21 +13,27 @@ MODEL_PATH = os.path.join(
     "/content/drive/MyDrive/piper_models",
     "en_US-amy-medium.onnx"
 )
+# MODEL_PATH = os.path.join(
+#     "models",
+#     "en_US-amy-medium.onnx"
+# )
 
 class VoiceInterface:
     def __init__(self, agent_func):
         self.agent_func = agent_func
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cpu"
 
         # --------------------
         # STT (Whisper)
         # --------------------
         print("Loading faster-whisper...")
         self.stt_model = WhisperModel(
-            "small.en",
+            "base.en",
             device=self.device,
-            compute_type="float16" if self.device == "cuda" else "int8"
+            # compute_type="float16" if self.device == "cuda" else "int8"
+            compute_type="int8"
         )
 
         # --------------------
@@ -127,6 +133,9 @@ class VoiceInterface:
         audio_path = self.speak(answer)
 
         return audio_path, answer
+
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 voice_interface = None

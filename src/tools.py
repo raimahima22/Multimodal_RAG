@@ -8,6 +8,13 @@ _sbc_retriever = None
 _spd_retriever = None
 _generator = None
 
+def normalize(x):
+    if isinstance(x, list):
+        return " ".join(map(str, x))
+    if isinstance(x, dict):
+        return x.get("content", str(x))
+    return str(x)
+
 def _get_shared_indexer(collection_name: str):
     global _shared_indexer
     if _shared_indexer is None:
@@ -45,6 +52,9 @@ def search_sbc(query: str) -> str:
     
     generator = _get_generator()
     answer = generator.generate_answer(query, hits)
+    #normalize output
+    answer = normalize(answer)
+
     return answer
 
 
@@ -58,4 +68,7 @@ def search_spd(query: str) -> str:
     
     generator = _get_generator()
     answer = generator.generate_answer(query, hits)
+    #normalize output
+    answer = normalize(answer)
+
     return answer

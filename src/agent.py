@@ -5,10 +5,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from typing import TypedDict, Annotated, List
 import operator
+from dotenv import load_dotenv
 
 from src.tools import search_sbc, search_spd
 from src.generator import create_llm
 
+load_dotenv()
 llm = create_llm()
 
 # ── Wrap tools properly for LangGraph ─────────────────────────────
@@ -86,4 +88,4 @@ def run_agent(query: str) -> str:
         return str(final_message)
         
     except Exception as e:
-        return f"⚠️ Error processing your request: {str(e)}"
+        return f" Error processing your request: {str(e)}"
