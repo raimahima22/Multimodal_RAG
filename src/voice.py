@@ -7,7 +7,7 @@ import os
 
 from faster_whisper import WhisperModel
 from piper import PiperVoice  # NEW (instead of TTS)
-from soundfile as sf
+import soundfile as sf
 
 MODEL_PATH = os.path.join(
     "/content/drive/MyDrive/piper_models",
