@@ -115,26 +115,26 @@ def main(force_reindex=False):
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
         # ── Voice Functions ─────────────────────────────────────────────────
-    def voice_pipeline(audio):
-        """Full voice → agent → voice response"""
-        if audio is None:
-            return None, "No audio received. Please record again."
+    # def voice_pipeline(audio):
+    #     """Full voice → agent → voice response"""
+    #     if audio is None:
+    #         return None, "No audio received. Please record again."
         
-        try:
-            total_start = time.time()
-            pipeline_start = time.time()
-            audio_path, result_text = voice_interface.voice_pipeline(audio)
-            pipeline_latency = time.time() - pipeline_start
+    #     try:
+    #         total_start = time.time()
+    #         pipeline_start = time.time()
+    #         audio_path, result_text = voice_interface.voice_pipeline(audio)
+    #         pipeline_latency = time.time() - pipeline_start
 
-            total_latency = time.time() - total_start
+    #         total_latency = time.time() - total_start
 
-            result_text += (
-                f"\n\n Pipeline Latency: {pipeline_latency:.2f}s"
-                f"\n Total Latency: {total_latency:.2f}s"
-            )
-            return audio_path, result_text
-        except Exception as e:
-            return None, f"Error in voice pipeline: {str(e)}"
+    #         result_text += (
+    #             f"\n\n Pipeline Latency: {pipeline_latency:.2f}s"
+    #             f"\n Total Latency: {total_latency:.2f}s"
+    #         )
+    #         return audio_path, result_text
+    #     except Exception as e:
+    #         return None, f"Error in voice pipeline: {str(e)}"
 
 
     # ── Custom CSS ─────────────
@@ -393,7 +393,7 @@ def main(force_reindex=False):
             # ==================== VOICE TAB ====================
             with gr.Tab("🎤 Voice Assistant"):
                 gr.HTML("<h2>Voice-Enabled Benefits Assistant</h2>")
-                gr.Markdown("Record your question → Get spoken answer")
+                gr.Markdown("**Speak → See transcription → Hear answer**")
 
                 with gr.Row():
                     audio_input = gr.Audio(
@@ -407,16 +407,75 @@ def main(force_reindex=False):
                     voice_submit = gr.Button("🔊 Send Voice Query", variant="primary", size="large")
 
                 with gr.Row():
+                    with gr.Column(scale=1):
+                        transcription = gr.Textbox(
+                            label="📝 Transcription",
+                            placeholder="Your spoken words will appear here...",
+                            lines=2,
+                            interactive=False
+                        )
+                    with gr.Column(scale=1):
+                        voice_output_text = gr.Markdown(
+                            label="🤖 Agent Response"
+                        )
+
+                with gr.Row():
                     voice_output_audio = gr.Audio(
-                        label="🤖 Agent Spoken Response",
-                        interactive=False
+                        label="🔊 Spoken Response",
+                        interactive=False,
+                        autoplay=True  # Auto-play the response
                     )
-                    voice_output_text = gr.Markdown(label="Transcription & Answer")
+
+                # Improved Voice Pipeline
+                def improved_voice_pipeline(audio):
+                    if audio is None:
+                        return None, "No audio received.", "Please record again.", None
+
+                    try:
+                        total_start = time.time()
+
+                        # Step 1: Transcribe immediately
+                        voice_interface = get_voice_interface(run_agent)
+                        query = voice_interface.transcribe_audio(audio)
+
+                        if not query or query.strip() == "":
+                            return None, "", "**Could not understand audio.** Please try again.", None
+
+                        # Show transcription
+                        transcription_text = f"**You said:** {query}"
+
+                        # Step 2: Get agent response
+                        start = time.time()
+                        answer = run_agent(query)
+                        agent_latency = time.time() - start
+
+                        # Step 3: Generate speech
+                        audio_path = voice_interface.speak(answer)
+
+                        total_latency = time.time() - total_start
+
+                        # Enhanced response text
+                        final_text = f"""
+**Answer:**
+
+{answer}
+
+---
+*Transcription latency: {voice_interface.transcribe_audio.__code__.co_varnames}*  
+*Agent latency: {agent_latency:.2f}s*  
+*Total: {total_latency:.2f}s*
+"""
+
+                        return audio_path, transcription_text, final_text, answer
+
+                    except Exception as e:
+                        error_msg = f"Error: {str(e)}"
+                        return None, "", error_msg, None
 
                 voice_submit.click(
-                    fn=voice_pipeline,
+                    fn=improved_voice_pipeline,
                     inputs=[audio_input],
-                    outputs=[voice_output_audio, voice_output_text]
+                    outputs=[voice_output_audio, transcription, voice_output_text, None]
                 )
 
     demo.launch(
