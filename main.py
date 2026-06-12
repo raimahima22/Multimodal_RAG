@@ -906,17 +906,4 @@ def main(force_reindex=False):
 
 if __name__ == "__main__":
     force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-    main(force_reindex) is the indentation correct here?
-
-            
-    demo.launch(
-        share=True,
-        server_name="0.0.0.0",
-        server_port=7860,
-        show_error=True,
-    )
-
-
-if __name__ == "__main__":
-    force_reindex = "--reindex" in sys.argv or "-r" in sys.argv
-    main(force_reindex)
+    main(force_reindex) 
