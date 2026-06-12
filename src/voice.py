@@ -113,21 +113,29 @@ class VoiceInterface:
     #     except Exception as e:
     #         return None, f"Error in voice pipeline: {str(e)}"
 
-    def speak_stream(self, text: str):
-        """
-        Stream TTS audio chunks using the underlying Piper (or TTS engine)
-        """
+    def speak_to_file(self, text: str, output_path="output.wav"):
         try:
-            return self.tts_engine.synthesize_stream_raw(
+            audio = self.tts_engine.synthesize(
                 text,
                 speaker_id=None,
                 length_scale=1.0,
                 noise_scale=0.667,
                 noise_w=0.8
             )
+
+            # If your engine already returns file → return it directly
+            if isinstance(audio, str):
+                return audio
+
+            # If it returns raw audio, save it (example)
+            import soundfile as sf
+            sf.write(output_path, audio, 22050)
+
+            return output_path
+
         except Exception as e:
-            print(f"TTS streaming error: {e}")
-            return iter([b''])  # fallback empty audio stream
+            print(f"TTS error: {e}")
+            return None
 
     def voice_pipeline(self, audio):
         """STT → Agent → TTS pipeline"""
