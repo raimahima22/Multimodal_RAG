@@ -881,10 +881,13 @@ def main(force_reindex=False):
                         # 3. Stream the speech
                         final_text = f"**{answer}**"
 
-                        # Return generator for streaming audio
-                        audio_generator = voice_interface.speak_stream(answer)
+                        for chunk in voice_interface.speak_stream(answer):
+                            yield chunk, transcription_text, final_text
 
-                        return audio_generator, transcription_text, final_text
+                        # Return generator for streaming audio
+                        # audio_generator = voice_interface.speak_stream(answer)
+
+                        # return audio_generator, transcription_text, final_text
 
                     except Exception as e:
                         print(f"Voice Error: {e}")
