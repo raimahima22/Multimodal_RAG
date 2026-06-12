@@ -67,71 +67,44 @@ class VoiceInterface:
 
         return text
 
-    # --------------------
-    # TTS (Piper)
-    # --------------------
-    def speak(self, text: str) -> str:
-        start = time.time()
+   
 
-        output_path = "agent_response.wav"
-
-        with open(output_path, "wb") as f:
-            self.voice.synthesize(text, f)
-
-        print(f"TTS Latency: {time.time() - start:.2f}s")
-
-        return output_path
-
-    # --------------------
-    # PIPELINE
-    # --------------------
-    # def voice_pipeline(self, audio):
-    #     """Full voice → agent → voice response (with latency tracking)"""
-    
-    #     if audio is None:
-    #         return None, "No audio received. Please record again."
-
-    #     try:
-    #         total_start = time.time()
-
-    #         # Voice pipeline (STT + LLM + TTS)
-       
-    #         pipeline_start = time.time()
-    #         audio_path, result_text = voice_interface.voice_pipeline(audio)
-    #         pipeline_latency = time.time() - pipeline_start
-
-    #         total_latency = time.time() - total_start
-
-    #         # Append latency info to output text
-    #         result_text += (
-    #             f"\n\n **Pipeline Latency:** {pipeline_latency:.2f}s"
-    #             f"\n **Total Latency:** {total_latency:.2f}s"
-    #         )
-
-    #         return audio_path, result_text
-
-    #     except Exception as e:
-    #         return None, f"Error in voice pipeline: {str(e)}"
-
-    def speak_to_file(self, text: str, output_path="output.wav"):
+    def speak_to_file(self, text: str):
         try:
-            audio = self.voice.synthesize(
-                text,
-                speaker_id=None,
-                length_scale=1.0,
-                noise_scale=0.667,
-                noise_w=0.8
-            )
-
-            # If your engine already returns file → return it directly
-            if isinstance(audio, str):
-                return audio
-
-            # If it returns raw audio, save it (example)
+            import os
+            import uuid
             import soundfile as sf
-            sf.write(output_path, audio, 22050)
 
-            return output_path
+            os.makedirs("outputs", exist_ok=True)
+            output_path = f"outputs/tts_{uuid.uuid4().hex}.wav"
+
+            result = self.voice.synthesize(text)
+
+            # CASE 1: (audio, sample_rate)
+
+            if isinstance(result, tuple) and len(result) == 2:
+                audio, sr = result
+                sf.write(output_path, audio, sr)
+                return output_path
+
+            # CASE 2: numpy array
+
+            elif isinstance(result, np.ndarray):
+                sf.write(output_path, result, self.sample_rate)
+                return output_path
+
+            # CASE 3: list / iterable audio
+            elif isinstance(result, (list, tuple)):
+                audio = np.array(result)
+                sf.write(output_path, audio, self.sample_rate)
+                return output_path
+
+            # CASE 4: unknown object → crash safely
+            else:
+                print("Unexpected Piper output:", type(result))
+                return None
+
+            
 
         except Exception as e:
             print(f"TTS error: {e}")
