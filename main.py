@@ -126,7 +126,7 @@ def main(force_reindex: bool = False):
 
         gr.HTML(APP_HEADER)  # ← from src/ui/templates.py
 
-        with gr.Tabs(elem_classes=["layout-shell"]):
+        with gr.Tabs(elem_id=["layout-shell"]):
 
             # ───────────────── Sidebar ───────────────── 
             with gr.Column(elem_id="sidebar", scale=0, min_width=240): 

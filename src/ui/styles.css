@@ -63,24 +63,33 @@ footer { display: none !important; }
 /* ── Layout shell ── */
 .layout-shell {
     display: flex;
+    flex-direction: row;
     gap: 0;
     background: #FFFFFF;
     border: 0.5px solid #DDDBD2;
     border-radius: 12px;
     overflow: hidden;
     min-height: 700px;
+    width: 100%;
+    height: 100vh;
 }
 
 /* ── Sidebar ── */
 #sidebar {
-    width: 240px;
+    width: 260px;
     min-width: 240px;
     background: #F7F6F3;
     border-right: 0.5px solid #DDDBD2;
     padding: 28px 20px;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
     gap: 0;
+}
+#main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 .sidebar-label {
     font-size: 10px;
