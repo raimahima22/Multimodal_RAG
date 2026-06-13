@@ -126,14 +126,14 @@ def main(force_reindex: bool = False):
 
         gr.HTML(APP_HEADER)  # ← from src/ui/templates.py
 
-        with gr.Tabs(elem_id=["layout-shell"]):
+        with gr.Row(elem_id=["layout-shell"]):
 
             # ───────────────── Sidebar ───────────────── 
             with gr.Column(elem_id="sidebar", scale=0, min_width=240): 
                 gr.HTML(SIDEBAR)
 
             # ── Voice Assistant ────────────────────────────────────────────
-            with gr.Column(scale=1):
+            with gr.Column(elem_id="main-content", scale=1):
                 gr.HTML(VOICE_HEADER)  # ← from src/ui/templates.py
 
                 with gr.Column(elem_id="voice-body"):
