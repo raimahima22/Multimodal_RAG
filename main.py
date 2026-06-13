@@ -89,7 +89,15 @@ def main(force_reindex=False):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
         query = history[-1][0]
-
+        # try:
+        #     bot_response = run_agent(query)
+        #     save_to_history(query, "Agent (SBC/SPD)", bot_response)
+        # except Exception as e:
+        #     bot_response = f"**Error generating response:**\n\n{str(e)}"
+        # history[-1][1] = bot_response
+        # aggressive_cleanup()
+        # clear_page_cache()
+        # return history, gr.update(interactive=True), gr.update(interactive=True)
         try:
             result = run_agent(query)                    # Now returns dict
         
@@ -117,80 +125,53 @@ def main(force_reindex=False):
     # def streaming_voice_pipeline(audio):
     #     if audio is None:
     #         return None, "No audio received. Please record again.", "**Please record something.**"
-    
-    #     transcription_text = "**Transcription failed.**"
-    #     final_text = "**Processing failed.**"
-    
     #     try:
     #         vi = get_voice_interface(run_agent)
     #         query = vi.transcribe_audio(audio)
-        
     #         if not query or not query.strip():
-    #             transcription_text = "Could not understand audio."
-    #             return None, transcription_text, "**Try speaking more clearly.**"
-        
+    #             return None, "Could not understand audio.", "**Try speaking more clearly.**"
     #         transcription_text = f"**You said:** {query}"
-        
-    #         # Call the agent
-    #         result = run_agent(query)
-    #         answer = result.get("answer", "No response generated.")
-    #         sources = result.get("sources", [])
-        
-    #         if sources:
-    #             source_text = f"\n\n**Sources:** {', '.join(sources)}"
-    #             final_text = f"**{answer}**{source_text}"
-    #         else:
-    #             final_text = f"**{answer}**"
-        
-    #         # Stream the spoken response
+    #         answer = run_agent(query)
+    #         final_text = f"**{answer}**"
     #         for chunk in vi.speak_stream(answer):
     #             yield chunk, transcription_text, final_text
-            
     #     except Exception as e:
     #         print(f"Voice Error: {e}")
-    #         error_msg = f"Error: {str(e)}"
-    #         return None, transcription_text, error_msg   # Now safe to use transcription_text
+    #         return None, f"Error: {str(e)}", "**Processing failed.**"
+
     def streaming_voice_pipeline(audio):
         if audio is None:
             return None, "No audio received. Please record again.", "**Please record something.**"
     
-        transcription_text = "**Transcription failed.**"
-        final_text = "**Processing failed.**"
-
         try:
             vi = get_voice_interface(run_agent)
             query = vi.transcribe_audio(audio)
-    
+        
             if not query or not query.strip():
-                transcription_text = "Could not understand audio."
-                return None, transcription_text, "**Try speaking more clearly.**"
-    
-            transcription_text = f"**You said:** {query}"
-    
-            # Call the agent
+                return None, "Could not understand audio.", "**Try speaking more clearly.**"
+        
+                transcription_text = f"**You said:** {query}"
+        
+            # Call agent
             result = run_agent(query)
-            full_answer = result.get("answer", "No response generated.")
+            answer = result.get("answer", "No response generated.")
             sources = result.get("sources", [])
-
-            # === CLEAN ANSWER FOR VOICE ===
-            clean_answer = full_answer
-            if "**Sources:" in full_answer:
-                clean_answer = full_answer.split("**Sources:")[0].strip()
         
-            final_text = f"**{clean_answer}**"
-        
-            # Print sources only in terminal
+            # Add sources to the displayed text
             if sources:
-                print(f" Sources: {', '.join(sources)}")
+                source_text = f"\n\n**Sources:** {', '.join(sources)}"
+                final_text = f"**{answer}**{source_text}"
+            else:
+                final_text = f"**{answer}**"
         
-            # Stream the spoken response (clean version)
-            for chunk in vi.speak_stream(clean_answer):   # Use clean_answer for speaking
+            # Stream the spoken response (without sources)
+            for chunk in vi.speak_stream(answer):
                 yield chunk, transcription_text, final_text
             
         except Exception as e:
             print(f"Voice Error: {e}")
-            error_msg = f"Error: {str(e)}"
-            return None, transcription_text, error_msg
+            return None, f"Error: {str(e)}", "**Processing failed.**"
+ 
 
 
     # ── Premium CSS ────────────────────────────────────────────────────────────
