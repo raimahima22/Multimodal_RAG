@@ -35,6 +35,7 @@ from transformers import AutoProcessor
 
 _shared_model = None
 _shared_processor = None
+_shared_qdrant_client = None
 
 def aggressive_cleanup():
     """
@@ -142,7 +143,7 @@ class MultimodalIndexer:
         #     trust_remote_code=True
         # )
         # === SHARE MODEL & PROCESSOR ===
-        global _shared_model, _shared_processor
+        global _shared_model, _shared_processor, _shared_qdrant_client
         
         if _shared_model is None:
             print(f"Loading ColQwen2.5 model → {self.model_name} (only once)")
@@ -165,6 +166,11 @@ class MultimodalIndexer:
             _shared_processor = self.processor
         else:
             self.processor = _shared_processor
+        
+        if _shared_qdrant_client is None:
+            print("Creating shared Qdrant client")
+            _shared_qdrant_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
+        self.local_client = _shared_qdrant_client
 
         print("Model and processor loaded successfully.")
 
