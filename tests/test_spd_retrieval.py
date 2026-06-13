@@ -182,9 +182,9 @@ class TestSearchSPDTool:
 SAMPLE_QUERIES = [
     ("Tell me about eligibility rules to participate in the plan.",          "eligibility"),
     ("What services are included in diabetic equipment and supplies?", "diabetic"),
-    ("What does HIPAA mean?",                    "HIPAA"),
-    ("What are the qualifying circumstances for FMLA leave?",            "FMLA"),
-    ("What are the qualifying circumstances for COBRA?",        "COBRA"),
+    ("How do I file a claim?",                    "claims"),
+    ("What are the plan definitions?",            "definitions"),
+    ("How does the appeals process work?",        "appeals"),
 ]
 
 
@@ -208,3 +208,19 @@ def test_sample_query_keyword_in_results(query, expected_keyword):
     assert expected_keyword in ocr_combined, (
         f"Keyword '{expected_keyword}' not found in results for query: '{query}'"
     )
+
+if __name__ == "__main__":
+    import subprocess
+    from datetime import datetime
+    from pathlib import Path
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = Path("/content/drive/MyDrive/test_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    report = results_dir / f"spd_retrieval_{timestamp}.txt"
+    subprocess.run(
+        f"pytest {__file__} -v 2>&1 | tee {report}",
+        shell=True
+    )
+    print(f"\n SPD results saved - {report}")

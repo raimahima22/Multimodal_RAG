@@ -278,3 +278,19 @@ def test_e2e_scenario(mock_agent, query, expected_source, keyword):
     assert expected_source in result["sources"], (
         f"Expected source '{expected_source}' not in {result['sources']}"
     )
+
+if __name__ == "__main__":
+    import subprocess
+    from datetime import datetime
+    from pathlib import Path
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = Path("/content/drive/MyDrive/test_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    report = results_dir / f"agent_integration_{timestamp}.txt"
+    subprocess.run(
+        f"pytest {__file__} -v 2>&1 | tee {report}",
+        shell=True
+    )
+    print(f"\n Agent integration results saved - {report}")

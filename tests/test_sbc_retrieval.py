@@ -200,3 +200,19 @@ def test_sample_query_keyword_in_results(query, expected_keyword):
     assert expected_keyword in ocr_combined, (
         f"Keyword '{expected_keyword}' not found in results for query: '{query}'"
     )
+
+if __name__ == "__main__":
+    import subprocess
+    from datetime import datetime
+    from pathlib import Path
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = Path("/content/drive/MyDrive/test_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    report = results_dir / f"sbc_retrieval_{timestamp}.txt"
+    subprocess.run(
+        f"pytest {__file__} -v 2>&1 | tee {report}",
+        shell=True
+    )
+    print(f"\n SBC results saved - {report}")
