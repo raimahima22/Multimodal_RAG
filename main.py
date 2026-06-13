@@ -171,6 +171,28 @@ def main(force_reindex=False):
     #     except Exception as e:
     #         print(f"Voice Error: {e}")
     #         return None, f"Error: {str(e)}", "**Processing failed.**"
+
+    def speak_stream(self, text: str):
+        """Generator that yields audio chunks for Gradio streaming"""
+        start = time.time()
+        
+        try:
+            # Piper supports raw streaming synthesis
+            for audio_bytes in self.voice.synthesize_stream_raw(
+                text,
+                speaker_id=None,
+                length_scale=1.0,
+                noise_scale=0.667,
+                noise_w=0.8
+            ):
+                yield audio_bytes  # Yield raw PCM chunks
+                
+            print(f"TTS Streaming completed in {time.time() - start:.2f}s")
+            
+        except Exception as e:
+            print(f"TTS Streaming Error: {e}")
+            # Fallback: yield silent audio or error
+            yield b''
     def streaming_voice_pipeline(audio):
         if audio is None:
             return None, "No audio received. Please record again.", "**Please record something.**"
@@ -193,16 +215,17 @@ def main(force_reindex=False):
             answer = result.get("answer", "No response generated.")
             sources = result.get("sources", [])
             # Clean answer for voice (remove sources)
-            clean_answer = answer.split("**Sources:")[0].strip() if "**Sources:" in answer else answer
+            clean_answer = full_answer.split("**Sources:")[0].strip() if "**Sources:" in full_answer else full_answer
+            clean_answer = clean_answer.replace("**", "").replace("\n\n", ". ").replace("\n", " ")
         
             final_text = f"**{clean_answer}**"
         
             if sources:
-                source_text = f"\n\n**Sources:** {', '.join(sources)}"
+                print(f" Sources: {', '.join(sources)}")
             
         
             # Stream the spoken response
-            for chunk in vi.speak_stream(answer):
+            for chunk in vi.speak_stream(clean_answer):
                 yield chunk, transcription_text, final_text
             
         except Exception as e:
