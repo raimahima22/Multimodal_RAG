@@ -74,7 +74,7 @@ def streaming_voice_pipeline(audio):
             yield None, "Could not understand audio.", "**Try speaking more clearly.**"
             return
 
-        transcription_text = f"**You said:** {query}"
+        transcription_text = f"{query}"
 
         result = run_agent(query)
         answer = result.get("answer", "No response generated.")

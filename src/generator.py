@@ -168,8 +168,9 @@ class MultimodalGenerator:
         - Documents are ranked by relevance (Rank 1 = most relevant)
         - Prefer higher ranked documents when answering
         - Use lower ranked documents if needed
-        - Use bullet points when they improve readability
+        - Use numbered lists when they improve readability
         - Do NOT explain step-by-step unless asked
+        - Give answers with good formatting and structure
        
         
         
