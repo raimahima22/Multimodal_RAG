@@ -102,7 +102,7 @@ import json
 from src.tools import search_sbc, search_spd
 from src.generator import create_llm
 
-load_dotenv()
+# load_dotenv()
 llm = create_llm()
 
 
