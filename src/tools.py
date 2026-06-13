@@ -3,7 +3,7 @@ from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 
 # Lazy loading for efficiency
-_shared_indexer = None
+_shared_indexers = {}
 _sbc_retriever = None
 _spd_retriever = None
 _generator = None
@@ -16,10 +16,18 @@ def normalize(x):
     return str(x)
 
 def _get_shared_indexer(collection_name: str):
-    global _shared_indexer
-    if _shared_indexer is None:
-        _shared_indexer = MultimodalIndexer(collection_name=collection_name)  # reuse model
-    return _shared_indexer
+    """Get or create indexer for a specific collection."""
+    global _shared_indexers
+    
+    if collection_name not in _shared_indexers:
+        print(f"   → Creating indexer for collection: {collection_name}")
+        _shared_indexers[collection_name] = MultimodalIndexer(
+            collection_name=collection_name
+        )
+    else:
+        print(f"   → Reusing existing indexer for: {collection_name}")
+    
+    return _shared_indexers[collection_name]
 
 def _get_sbc_retriever():
     global _sbc_retriever
@@ -76,32 +84,19 @@ def search_spd(query: str) -> str:
 # Add this at the bottom of src/tools.py (after all existing functions)
 
 def preload_all_models():
-    """Preload all models, indexers, retrievers and generator at startup."""
-    print(" Preloading all models and indexers... This may take 10-30 seconds.")
+    print(" Preloading all models and indexers...")
     
     try:
-        # Preload Generator + LLM
-        print("   • Loading MultimodalGenerator (LLM)...")
-        generator = _get_generator()
+        print("   • Loading Generator...")
+        _get_generator()
         
-        # Preload both retrievers (this loads indexers + embeddings)
         print("   • Loading SBC Retriever...")
         _get_sbc_retriever()
         
         print("   • Loading SPD Retriever...")
         _get_spd_retriever()
         
-        # Optional: Do a small dummy search to warm up embeddings and Qdrant
-        print("   • Warming up retrieval...")
-        dummy_query = "What is the deductible?"
-        
-        sbc_ret = _get_sbc_retriever()
-        spd_ret = _get_spd_retriever()
-        
-        _ = sbc_ret.search(dummy_query, top_k=1)
-        _ = spd_ret.search(dummy_query, top_k=1)
-        
-        print(" All models preloaded successfully!")
+        print(" All models and both collections preloaded successfully!")
         
     except Exception as e:
-        print(f" Preloading failed (some models may load on first use): {e}")
+        print(f" Preload error: {e}")

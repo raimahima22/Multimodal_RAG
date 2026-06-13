@@ -6,6 +6,7 @@ from datetime import datetime
 import torch
 import gradio as gr
 import time
+import numpy as np
 
 from src.utils import clear_page_cache
 from src.indexer import MultimodalIndexer
