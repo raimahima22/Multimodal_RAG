@@ -139,39 +139,76 @@ def main(force_reindex=False):
     #         print(f"Voice Error: {e}")
     #         return None, f"Error: {str(e)}", "**Processing failed.**"
 
+    # def streaming_voice_pipeline(audio):
+    #     if audio is None:
+    #         return None, "No audio received. Please record again.", "**Please record something.**"
+    
+    #     try:
+    #         vi = get_voice_interface(run_agent)
+    #         query = vi.transcribe_audio(audio)
+        
+    #         if not query or not query.strip():
+    #             return None, "Could not understand audio.", "**Try speaking more clearly.**"
+        
+    #             transcription_text = f"**You said:** {query}"
+        
+    #         # Call agent
+    #         result = run_agent(query)
+    #         answer = result.get("answer", "No response generated.")
+    #         sources = result.get("sources", [])
+        
+    #         # Add sources to the displayed text
+    #         if sources:
+    #             source_text = f"\n\n**Sources:** {', '.join(sources)}"
+    #             final_text = f"**{answer}**{source_text}"
+    #         else:
+    #             final_text = f"**{answer}**"
+        
+    #         # Stream the spoken response (without sources)
+    #         for chunk in vi.speak_stream(answer):
+    #             yield chunk, transcription_text, final_text
+            
+    #     except Exception as e:
+    #         print(f"Voice Error: {e}")
+    #         return None, f"Error: {str(e)}", "**Processing failed.**"
     def streaming_voice_pipeline(audio):
         if audio is None:
             return None, "No audio received. Please record again.", "**Please record something.**"
+    
+        transcription_text = "**Transcription failed.**"
+        final_text = "**Processing failed.**"
     
         try:
             vi = get_voice_interface(run_agent)
             query = vi.transcribe_audio(audio)
         
             if not query or not query.strip():
-                return None, "Could not understand audio.", "**Try speaking more clearly.**"
+                transcription_text = "Could not understand audio."
+                return None, transcription_text, "**Try speaking more clearly.**"
         
-                transcription_text = f"**You said:** {query}"
+            transcription_text = f"**You said:** {query}"
         
-            # Call agent
+            # Call the agent
             result = run_agent(query)
             answer = result.get("answer", "No response generated.")
             sources = result.get("sources", [])
+            # Clean answer for voice (remove sources)
+            clean_answer = answer.split("**Sources:")[0].strip() if "**Sources:" in answer else answer
         
-            # Add sources to the displayed text
+            final_text = f"**{clean_answer}**"
+        
             if sources:
                 source_text = f"\n\n**Sources:** {', '.join(sources)}"
-                final_text = f"**{answer}**{source_text}"
-            else:
-                final_text = f"**{answer}**"
+            
         
-            # Stream the spoken response (without sources)
+            # Stream the spoken response
             for chunk in vi.speak_stream(answer):
                 yield chunk, transcription_text, final_text
             
         except Exception as e:
             print(f"Voice Error: {e}")
-            return None, f"Error: {str(e)}", "**Processing failed.**"
- 
+            error_msg = f"Error: {str(e)}"
+            return None, transcription_text, error_msg   # Now safe to use transcription_text
 
 
     # ── Premium CSS ────────────────────────────────────────────────────────────
