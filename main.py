@@ -19,24 +19,6 @@ from src.voice import get_voice_interface
 HISTORY_FILE = "chat_history.json"
 
 
-# def save_to_history(query, source_input, answer):
-#     history_data = []
-#     if os.path.exists(HISTORY_FILE):
-#         try:
-#             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-#                 history_data = json.load(f)
-#         except Exception:
-#             history_data = []
-
-#     history_data.append({
-#         "timestamp": datetime.now().isoformat(),
-#         "query": query,
-#         "source": source_input,
-#         "answer": answer,
-#     })
-
-#     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-#         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
 def save_to_history(query, answer, sources):
     """Save conversation with sources"""
@@ -122,77 +104,7 @@ def main(force_reindex=False):
         clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
-    # def streaming_voice_pipeline(audio):
-    #     if audio is None:
-    #         return None, "No audio received. Please record again.", "**Please record something.**"
-    #     try:
-    #         vi = get_voice_interface(run_agent)
-    #         query = vi.transcribe_audio(audio)
-    #         if not query or not query.strip():
-    #             return None, "Could not understand audio.", "**Try speaking more clearly.**"
-    #         transcription_text = f"**You said:** {query}"
-    #         answer = run_agent(query)
-    #         final_text = f"**{answer}**"
-    #         for chunk in vi.speak_stream(answer):
-    #             yield chunk, transcription_text, final_text
-    #     except Exception as e:
-    #         print(f"Voice Error: {e}")
-    #         return None, f"Error: {str(e)}", "**Processing failed.**"
 
-    # def streaming_voice_pipeline(audio):
-    #     if audio is None:
-    #         return None, "No audio received. Please record again.", "**Please record something.**"
-    
-    #     try:
-    #         vi = get_voice_interface(run_agent)
-    #         query = vi.transcribe_audio(audio)
-        
-    #         if not query or not query.strip():
-    #             return None, "Could not understand audio.", "**Try speaking more clearly.**"
-        
-    #             transcription_text = f"**You said:** {query}"
-        
-    #         # Call agent
-    #         result = run_agent(query)
-    #         answer = result.get("answer", "No response generated.")
-    #         sources = result.get("sources", [])
-        
-    #         # Add sources to the displayed text
-    #         if sources:
-    #             source_text = f"\n\n**Sources:** {', '.join(sources)}"
-    #             final_text = f"**{answer}**{source_text}"
-    #         else:
-    #             final_text = f"**{answer}**"
-        
-    #         # Stream the spoken response (without sources)
-    #         for chunk in vi.speak_stream(answer):
-    #             yield chunk, transcription_text, final_text
-            
-    #     except Exception as e:
-    #         print(f"Voice Error: {e}")
-    #         return None, f"Error: {str(e)}", "**Processing failed.**"
-
-    def speak_stream(self, text: str):
-        """Generator that yields audio chunks for Gradio streaming"""
-        start = time.time()
-        
-        try:
-            # Piper supports raw streaming synthesis
-            for audio_bytes in self.voice.synthesize_stream_raw(
-                text,
-                speaker_id=None,
-                length_scale=1.0,
-                noise_scale=0.667,
-                noise_w=0.8
-            ):
-                yield audio_bytes  # Yield raw PCM chunks
-                
-            print(f"TTS Streaming completed in {time.time() - start:.2f}s")
-            
-        except Exception as e:
-            print(f"TTS Streaming Error: {e}")
-            # Fallback: yield silent audio or error
-            yield b''
     def streaming_voice_pipeline(audio):
         if audio is None:
             return None, "No audio received. Please record again.", "**Please record something.**"
@@ -215,7 +127,7 @@ def main(force_reindex=False):
             answer = result.get("answer", "No response generated.")
             sources = result.get("sources", [])
             # Clean answer for voice (remove sources)
-            clean_answer = full_answer.split("**Sources:")[0].strip() if "**Sources:" in full_answer else full_answer
+            clean_answer = answer.split("**Sources:")[0].strip() if "**Sources:" in answer else answer
             clean_answer = clean_answer.replace("**", "").replace("\n\n", ". ").replace("\n", " ")
         
             final_text = f"**{clean_answer}**"
