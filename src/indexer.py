@@ -111,8 +111,8 @@ class MultimodalIndexer:
                 If True, recreate the collection from scratch.
         """
         #device setup
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
+        # self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # self.torch_dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
         #model configuration
         self.collection_name = collection_name
         self.model_name = "vidore/colqwen2.5-v0.2"
@@ -174,7 +174,7 @@ class MultimodalIndexer:
 
         print("Model and processor loaded successfully.")
 
-        self.local_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
+        # self.local_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
         # self.local_client = QdrantClient(path="./final_qdrant_db")
 
 
