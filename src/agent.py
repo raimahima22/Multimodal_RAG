@@ -15,7 +15,21 @@ from src.generator import create_llm
 load_dotenv()
 llm = create_llm()
 
-
+_NO_RESULT_PHRASES = [
+    "no relevant information found",
+    "answer not found in provided documents",
+]
+ 
+def _is_empty_result(text: str) -> bool:
+    """Return True when a tool result carries no useful information."""
+    lowered = text.lower().strip()
+    return any(phrase in lowered for phrase in _NO_RESULT_PHRASES)
+ 
+_FALLBACK_MESSAGE = (
+    "I'm sorry, I wasn't able to find relevant information in the "
+    "available healthcare benefit documents for your question. "
+    "Please try rephrasing, or contact your plan administrator directly."
+)
 
 
 # ========================== TOOLS with Logging ==========================
