@@ -33,6 +33,8 @@ from qdrant_client.models import (
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from transformers import AutoProcessor
 
+_shared_model = None
+_shared_processor = None
 
 def aggressive_cleanup():
     """
@@ -124,21 +126,45 @@ class MultimodalIndexer:
 
         
         #load processor and model
-        self.model = ColQwen2_5.from_pretrained(
-            self.model_name,
-            torch_dtype=self.torch_dtype,
-            trust_remote_code=True,
-            # low_cpu_mem_usage=True,
-            device_map="auto",
-            attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
+        # self.model = ColQwen2_5.from_pretrained(
+        #     self.model_name,
+        #     torch_dtype=self.torch_dtype,
+        #     trust_remote_code=True,
+        #     # low_cpu_mem_usage=True,
+        #     device_map="auto",
+        #     attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
     
-        ).eval()
+        # ).eval()
         
-        #initialize Qdrant
-        self.processor = ColQwen2_5_Processor.from_pretrained(
-            self.model_name,
-            trust_remote_code=True
-        )
+        # #initialize Qdrant
+        # self.processor = ColQwen2_5_Processor.from_pretrained(
+        #     self.model_name,
+        #     trust_remote_code=True
+        # )
+        # === SHARE MODEL & PROCESSOR ===
+        global _shared_model, _shared_processor
+        
+        if _shared_model is None:
+            print(f"Loading ColQwen2.5 model → {self.model_name} (only once)")
+            self.model = ColQwen2_5.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                trust_remote_code=True,
+                device_map="auto",
+                attn_implementation="flash_attention_2" if is_flash_attn_2_available() else None,
+            ).eval()
+            _shared_model = self.model
+        else:
+            print("Reusing already loaded ColQwen2.5 model")
+            self.model = _shared_model
+
+        if _shared_processor is None:
+            self.processor = ColQwen2_5_Processor.from_pretrained(
+                self.model_name, trust_remote_code=True
+            )
+            _shared_processor = self.processor
+        else:
+            self.processor = _shared_processor
 
         print("Model and processor loaded successfully.")
 
