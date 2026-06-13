@@ -58,44 +58,6 @@ def save_to_history(query: str, answer: str, sources: list):
         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
 
-def user_turn(message, history):
-    if not message or not message.strip():
-        return history, "", gr.update(interactive=False), gr.update(interactive=False)
-    history = history or []
-    history.append({"role": "user", "content": message.strip()})
-    history.append({"role": "assistant", "content": "Thinking…"})
-    return history, "", gr.update(interactive=False), gr.update(interactive=False)
-
-
-def bot_turn(history):
-    if not history:
-        return history, gr.update(interactive=True), gr.update(interactive=True)
-
-    user_messages = [m for m in history if m["role"] == "user"]
-    if not user_messages:
-        return history, gr.update(interactive=True), gr.update(interactive=True)
-
-    query = user_messages[-1]["content"]
-    display_answer = ""
-
-    try:
-        result = run_agent(query)
-        answer = result.get("answer", "No response generated.")
-        sources = result.get("sources", [])
-        display_answer = answer + (f"\n\n**Sources:** {', '.join(sources)}" if sources else "")
-        save_to_history(query, answer, sources)
-
-    except Exception as e:
-        display_answer = f"**Error generating response:**\n\n{str(e)}"
-
-    finally:
-        _aggressive_cleanup()
-        clear_page_cache()
-
-    history[-1]["content"] = display_answer
-    return history, gr.update(interactive=True), gr.update(interactive=True)
-
-
 def streaming_voice_pipeline(audio):
     if audio is None:
         yield None, "No audio received. Please record again.", "**Please record something.**"
@@ -166,64 +128,9 @@ def main(force_reindex: bool = False):
 
         with gr.Tabs(elem_classes=["tab-nav"]):
 
-            # ── Text Chat ──────────────────────────────────────────────────
-            with gr.Tab("Text Chat"):
-                with gr.Row(elem_classes=["layout-shell"]):
-
-                    with gr.Column(elem_id="sidebar", scale=0, min_width=240):
-                        gr.HTML(SIDEBAR)  # ← from src/ui/templates.py
-                        clear_btn = gr.Button(
-                            "Clear conversation", elem_id="clear-btn", size="sm"
-                        )
-
-                    with gr.Column(elem_id="chat-area", scale=1):
-                        chatbot = gr.Chatbot(
-                            elem_id="chatbot",
-                            type="messages",
-                            height=540,
-                            bubble_full_width=False,
-                            render_markdown=True,
-                            show_label=False,
-                        )
-
-                        with gr.Row(elem_id="input-row"):
-                            msg = gr.Textbox(
-                                placeholder="Ask about your benefits plan…",
-                                scale=8, lines=1, max_lines=4,
-                                autofocus=True, show_label=False,
-                                container=False, elem_id="msg-input",
-                            )
-                            submit_btn = gr.Button(
-                                "Send", variant="primary",
-                                scale=0, min_width=90, elem_id="send-btn",
-                            )
-
-                        with gr.Row(elem_classes=["examples-holder"]):
-                            gr.Examples(
-                                examples=[
-                                    ["What is the deductible for this plan?"],
-                                    ["What services are covered under preventive care?"],
-                                    ["What is the out-of-pocket maximum?"],
-                                    ["Tell me about eligibility rules."],
-                                ],
-                                inputs=[msg],
-                                label=None,
-                            )
-
-                msg.submit(
-                    user_turn, [msg, chatbot], [chatbot, msg, msg, submit_btn]
-                ).then(
-                    bot_turn, [chatbot], [chatbot, msg, submit_btn]
-                )
-                submit_btn.click(
-                    user_turn, [msg, chatbot], [chatbot, msg, msg, submit_btn]
-                ).then(
-                    bot_turn, [chatbot], [chatbot, msg, submit_btn]
-                )
-                clear_btn.click(
-                    lambda: ([], gr.update(interactive=True), gr.update(interactive=True)),
-                    None, [chatbot, msg, submit_btn],
-                )
+            # ───────────────── Sidebar ───────────────── 
+            with gr.Column(elem_id="sidebar", scale=0, min_width=240): 
+                gr.HTML(SIDEBAR)
 
             # ── Voice Assistant ────────────────────────────────────────────
             with gr.Tab("Voice Assistant"):
@@ -266,6 +173,18 @@ def main(force_reindex: bool = False):
                             label=None, show_label=False, streaming=True,
                             autoplay=True, interactive=False, show_download_button=True,
                         )
+                    with gr.Column(elem_classes=["voice-card"]):
+                        gr.HTML(""" 
+                        <div class="voice-card-label"> 
+                            Example Questions 
+                        </div> 
+                        <ul style="line-height:2;"> 
+                            <li>What is the deductible for this plan?</li> 
+                            <li>What services are covered under preventive care?</li> 
+                            <li>What is the out-of-pocket maximum?</li> 
+                            <li>Tell me about eligibility rules.</li> 
+                        </ul> 
+                        """)
 
                 voice_submit.click(
                     streaming_voice_pipeline,

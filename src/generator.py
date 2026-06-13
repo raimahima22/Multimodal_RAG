@@ -165,11 +165,10 @@ class MultimodalGenerator:
         Guidelines:
         - Answer clearly, concisely and directly. Do NOT explain your reasoning process or compare different plans unless specifically asked to do so.
         - Be natural and professional
-        -Documents are ranked by relevance (Rank 1 = most relevant)
+        - Documents are ranked by relevance (Rank 1 = most relevant)
         - Prefer higher ranked documents when answering
         - Use lower ranked documents if needed
-
-        - Use bullet points only when they improve readability
+        - Use bullet points when they improve readability
         - Do NOT explain step-by-step unless asked
        
         
