@@ -364,12 +364,29 @@ def tools_node(state: AgentState):
 
 def final_answer_node(state: AgentState):
     sources = list(dict.fromkeys(state.get("sources", [])))
-    final_content = state["messages"][-1].content if state["messages"] else "No answer."
     
+    # Get the last message (tool result)
+    last_message = state["messages"][-1]
+    
+    # If the last message is a JSON string from tool, clean it
+    content = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    
+    try:
+        if content.strip().startswith('{') and '"answer"' in content:
+            data = json.loads(content)
+            clean_answer = data.get("answer", content)
+        else:
+            clean_answer = content
+    except:
+        clean_answer = content
+
+    # Create nice final response
     if sources:
-        final_content += f"\n\n**Sources:** {', '.join(sources)}"
-    
-    print(f" Final Answer Generated | Sources: {sources}")
+        final_content = f"{clean_answer}\n\n**Sources:** {', '.join(sources)}"
+    else:
+        final_content = clean_answer
+
+    # print(f" Final clean answer generated | Sources: {sources}")
     return {"messages": [AIMessage(content=final_content)]}
 
 
@@ -406,7 +423,7 @@ def run_agent(query: str) -> Dict:
         final_answer = result["messages"][-1].content
         sources = result.get("sources", [])
         
-        print(f" FINAL SOURCES USED: {sources}")
+        # print(f" FINAL SOURCES USED: {sources}")
         print(f"{'='*60}\n")
         
         return {"answer": final_answer, "sources": sources}
