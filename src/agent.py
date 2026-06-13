@@ -262,6 +262,7 @@ from langchain_core.tools import tool
 from typing import TypedDict, Annotated, List, Dict
 import operator
 import json
+from dotenv import load_dotenv
 
 from src.tools import search_sbc, search_spd
 from src.generator import create_llm
@@ -270,22 +271,24 @@ load_dotenv()
 llm = create_llm()
 
 
+
+
 # ========================== TOOLS with Logging ==========================
 @tool
 def search_sbc_tool(query: str) -> str:
     """Use ONLY for quick benefit summaries, costs, deductibles, copays, coinsurance, out-of-pocket maximums."""
-    print(f"🔧 [TOOL CALL] search_sbc_tool → Query: {query[:80]}...")
+    print(f" [TOOL CALL] search_sbc_tool → Query: {query[:80]}...")
     result = search_sbc(query)
-    print(f"✅ SBC Tool completed | Result length: {len(result)} chars")
+    print(f" SBC Tool completed | Result length: {len(result)} chars")
     return json.dumps({"answer": result, "source": "SBC"})
 
 
 @tool
 def search_spd_tool(query: str) -> str:
     """Use ONLY for detailed plan rules, eligibility, exclusions, limitations, claim procedures, definitions, appeals."""
-    print(f"🔧 [TOOL CALL] search_spd_tool → Query: {query[:80]}...")
+    print(f" [TOOL CALL] search_spd_tool → Query: {query[:80]}...")
     result = search_spd(query)
-    print(f"✅ SPD Tool completed | Result length: {len(result)} chars")
+    print(f" SPD Tool completed | Result length: {len(result)} chars")
     return json.dumps({"answer": result, "source": "SPD"})
 
 
@@ -301,7 +304,7 @@ class AgentState(TypedDict):
 # ========================== ROUTER with Logging ==========================
 def route_query(query: str) -> str:
     """Force routing decision every time"""
-    print(f"🤖 [ROUTER] Analyzing query: {query[:100]}...")
+    print(f" [ROUTER] Analyzing query: {query[:100]}...")
     
     prompt = f"""
     You are a strict router. Classify the CURRENT question into exactly one category.
@@ -318,10 +321,10 @@ def route_query(query: str) -> str:
         response = llm.invoke(prompt)
         decision = response.content.strip().upper()
         result = "sbc" if "SBC" in decision else "spd"
-        print(f"✅ [ROUTER] Decided: {result.upper()}")
+        print(f" [ROUTER] Decided: {result.upper()}")
         return result
     except Exception as e:
-        print(f"⚠️ Router failed: {e} → defaulting to SPD")
+        print(f" Router failed: {e} → defaulting to SPD")
         return "spd"
 
 
@@ -342,10 +345,10 @@ Follow the router. You MUST use the correct tool. Do not refuse.
 
 
 def tools_node(state: AgentState):
-    print("🔨 Executing tool(s)...")
+    print(" Executing tool(s)...")
     tool_node = ToolNode(tools)
     result = tool_node.invoke(state)
-    print("🔨 Tool execution finished")
+    print(" Tool execution finished")
     
     sources = []
     for msg in result.get("messages", []):
@@ -366,7 +369,7 @@ def final_answer_node(state: AgentState):
     if sources:
         final_content += f"\n\n**Sources:** {', '.join(sources)}"
     
-    print(f"📤 Final Answer Generated | Sources: {sources}")
+    print(f" Final Answer Generated | Sources: {sources}")
     return {"messages": [AIMessage(content=final_content)]}
 
 
@@ -390,7 +393,7 @@ agent = build_agent()
 
 def run_agent(query: str) -> Dict:
     print(f"\n{'='*60}")
-    print(f"🚀 NEW QUERY: {query}")
+    print(f" NEW QUERY: {query}")
     print(f"{'='*60}\n")
     
     if not query or not query.strip():
@@ -403,11 +406,11 @@ def run_agent(query: str) -> Dict:
         final_answer = result["messages"][-1].content
         sources = result.get("sources", [])
         
-        print(f"🎯 FINAL SOURCES USED: {sources}")
+        print(f" FINAL SOURCES USED: {sources}")
         print(f"{'='*60}\n")
         
         return {"answer": final_answer, "sources": sources}
         
     except Exception as e:
-        print(f"❌ Agent Error: {e}")
+        print(f" Agent Error: {e}")
         return {"answer": f"Error: {str(e)}", "sources": []}
