@@ -22,8 +22,8 @@ class VoiceInterface:
     def __init__(self, agent_func):
         self.agent_func = agent_func
 
-        # self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = "cpu"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # self.device = "cpu"
 
         # --------------------
         # STT (Whisper)
@@ -32,8 +32,8 @@ class VoiceInterface:
         self.stt_model = WhisperModel(
             "base.en",
             device=self.device,
-            # compute_type="float16" if self.device == "cuda" else "int8"
-            compute_type="int8"
+            compute_type="float16" if self.device == "cuda" else "int8"
+            # compute_type="int8"
         )
 
         # --------------------

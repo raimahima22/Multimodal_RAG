@@ -12,12 +12,33 @@ from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
 from src.agent import run_agent
+from src.tools import preload_all_models
 from src.voice import get_voice_interface
 
 HISTORY_FILE = "chat_history.json"
 
 
-def save_to_history(query, source_input, answer):
+# def save_to_history(query, source_input, answer):
+#     history_data = []
+#     if os.path.exists(HISTORY_FILE):
+#         try:
+#             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+#                 history_data = json.load(f)
+#         except Exception:
+#             history_data = []
+
+#     history_data.append({
+#         "timestamp": datetime.now().isoformat(),
+#         "query": query,
+#         "source": source_input,
+#         "answer": answer,
+#     })
+
+#     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+#         json.dump(history_data, f, indent=2, ensure_ascii=False)
+
+def save_to_history(query, answer, sources):
+    """Save conversation with sources"""
     history_data = []
     if os.path.exists(HISTORY_FILE):
         try:
@@ -29,7 +50,7 @@ def save_to_history(query, source_input, answer):
     history_data.append({
         "timestamp": datetime.now().isoformat(),
         "query": query,
-        "source": source_input,
+        "sources": sources,                    # <-- Now stores list of sources
         "answer": answer,
     })
 
@@ -45,7 +66,8 @@ def aggressive_cleanup():
 
 def main(force_reindex=False):
     print("\nInitializing Multimodal Voice RAG System...\n")
-
+    preload_all_models()  # preload all models to reduce first-query latency
+    print("\nSystem is fully ready!\n")
     print("Warming up Agent and retrieval models...")
     try:
         _ = run_agent("warmup query for initialization")
@@ -66,32 +88,89 @@ def main(force_reindex=False):
         if not history:
             return history, gr.update(interactive=True), gr.update(interactive=True)
         query = history[-1][0]
+        # try:
+        #     bot_response = run_agent(query)
+        #     save_to_history(query, "Agent (SBC/SPD)", bot_response)
+        # except Exception as e:
+        #     bot_response = f"**Error generating response:**\n\n{str(e)}"
+        # history[-1][1] = bot_response
+        # aggressive_cleanup()
+        # clear_page_cache()
+        # return history, gr.update(interactive=True), gr.update(interactive=True)
         try:
-            bot_response = run_agent(query)
-            save_to_history(query, "Agent (SBC/SPD)", bot_response)
+            result = run_agent(query)                    # Now returns dict
+        
+            answer = result.get("answer", "No response generated.")
+            sources = result.get("sources", [])
+        
+            # Create nice source display
+            if sources:
+                source_text = f"\n\n**Sources:** {', '.join(sources)}"
+                display_answer = answer + source_text
+            else:
+                display_answer = answer
+            
+            save_to_history(query, answer, sources)     # Save raw for history
+        
         except Exception as e:
-            bot_response = f"**Error generating response:**\n\n{str(e)}"
-        history[-1][1] = bot_response
+            display_answer = f"**Error generating response:**\n\n{str(e)}"
+            sources = []
+
+        history[-1][1] = display_answer
         aggressive_cleanup()
         clear_page_cache()
         return history, gr.update(interactive=True), gr.update(interactive=True)
 
+    # def streaming_voice_pipeline(audio):
+    #     if audio is None:
+    #         return None, "No audio received. Please record again.", "**Please record something.**"
+    #     try:
+    #         vi = get_voice_interface(run_agent)
+    #         query = vi.transcribe_audio(audio)
+    #         if not query or not query.strip():
+    #             return None, "Could not understand audio.", "**Try speaking more clearly.**"
+    #         transcription_text = f"**You said:** {query}"
+    #         answer = run_agent(query)
+    #         final_text = f"**{answer}**"
+    #         for chunk in vi.speak_stream(answer):
+    #             yield chunk, transcription_text, final_text
+    #     except Exception as e:
+    #         print(f"Voice Error: {e}")
+    #         return None, f"Error: {str(e)}", "**Processing failed.**"
+
     def streaming_voice_pipeline(audio):
         if audio is None:
             return None, "No audio received. Please record again.", "**Please record something.**"
+    
         try:
             vi = get_voice_interface(run_agent)
             query = vi.transcribe_audio(audio)
+        
             if not query or not query.strip():
                 return None, "Could not understand audio.", "**Try speaking more clearly.**"
-            transcription_text = f"**You said:** {query}"
-            answer = run_agent(query)
-            final_text = f"**{answer}**"
+        
+                transcription_text = f"**You said:** {query}"
+        
+            # Call agent
+            result = run_agent(query)
+            answer = result.get("answer", "No response generated.")
+            sources = result.get("sources", [])
+        
+            # Add sources to the displayed text
+            if sources:
+                source_text = f"\n\n**Sources:** {', '.join(sources)}"
+                final_text = f"**{answer}**{source_text}"
+            else:
+                final_text = f"**{answer}**"
+        
+            # Stream the spoken response (without sources)
             for chunk in vi.speak_stream(answer):
                 yield chunk, transcription_text, final_text
+            
         except Exception as e:
             print(f"Voice Error: {e}")
             return None, f"Error: {str(e)}", "**Processing failed.**"
+
 
     # ── Premium CSS ────────────────────────────────────────────────────────────
     custom_css = """

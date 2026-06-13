@@ -72,3 +72,36 @@ def search_spd(query: str) -> str:
     answer = normalize(answer)
 
     return answer
+
+# Add this at the bottom of src/tools.py (after all existing functions)
+
+def preload_all_models():
+    """Preload all models, indexers, retrievers and generator at startup."""
+    print(" Preloading all models and indexers... This may take 10-30 seconds.")
+    
+    try:
+        # Preload Generator + LLM
+        print("   • Loading MultimodalGenerator (LLM)...")
+        generator = _get_generator()
+        
+        # Preload both retrievers (this loads indexers + embeddings)
+        print("   • Loading SBC Retriever...")
+        _get_sbc_retriever()
+        
+        print("   • Loading SPD Retriever...")
+        _get_spd_retriever()
+        
+        # Optional: Do a small dummy search to warm up embeddings and Qdrant
+        print("   • Warming up retrieval...")
+        dummy_query = "What is the deductible?"
+        
+        sbc_ret = _get_sbc_retriever()
+        spd_ret = _get_spd_retriever()
+        
+        _ = sbc_ret.search(dummy_query, top_k=1)
+        _ = spd_ret.search(dummy_query, top_k=1)
+        
+        print(" All models preloaded successfully!")
+        
+    except Exception as e:
+        print(f" Preloading failed (some models may load on first use): {e}")
