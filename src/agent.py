@@ -8,7 +8,7 @@ import operator
 import json
 import re
 from dotenv import load_dotenv
-
+from src.tools import search_sbc, search_spd, search_both_parallel 
 from src.tools import search_sbc, search_spd
 from src.generator import create_llm
 

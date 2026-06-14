@@ -1,6 +1,7 @@
 from src.indexer import MultimodalIndexer
 from src.retriever import MultimodalRetriever
 from src.generator import MultimodalGenerator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Lazy loading for efficiency
 _shared_indexers = {}
@@ -107,6 +108,29 @@ def search_spd(query: str) -> str:
     answer = normalize(answer)
 
     return answer
+
+def search_both_parallel(query: str) -> dict:
+    """
+    Run SBC and SPD searches concurrently and return both results.
+ 
+    Returns:
+        {"sbc": str, "spd": str}
+    """
+    results = {}
+ 
+    def _run_sbc():
+        return "sbc", search_sbc(query)
+ 
+    def _run_spd():
+        return "spd", search_spd(query)
+ 
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_run_sbc), executor.submit(_run_spd)]
+        for future in as_completed(futures):
+            key, value = future.result()
+            results[key] = value
+ 
+    return results
 
 
 def preload_all_models():

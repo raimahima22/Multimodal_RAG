@@ -10,6 +10,7 @@ import gc
 from faster_whisper import WhisperModel
 from piper import PiperVoice
 
+
 # MODEL_PATH = os.environ.get(
 #     "PIPER_MODEL_PATH",
 #     "models/en_US-amy-medium.onnx"         
@@ -41,21 +42,33 @@ class VoiceInterface:
             agent_func (callable): Function that processes transcribed text
                                    and returns agent response.
         """
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute = "float16" if self.device == "cuda" else "int8"
+
         self.agent_func = agent_func
-        self.device = "cpu"   # whisper runs fine on CPU; change to "cuda" if available
+        # self.device = "cpu"   # whisper runs fine on CPU
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
         # STT (speech-to-text model initialization)
         print("[VOICE] Loading faster-whisper (base.en)...")
         self.stt_model = WhisperModel(
             "base.en",
             device=self.device,
-            compute_type="int8",
+            compute_type=compute,
         )
 
         # TTS (text-to-speech model initialization)
         print(f"[VOICE] Loading Piper TTS from {MODEL_PATH}...")
         self.voice = PiperVoice.load(model_path=MODEL_PATH)
         self.sample_rate = 22050
+
+         #    the ONNX runtime is JIT-compiled before the first real query.
+        print("[VOICE] Pre-warming Piper TTS...")
+        for _ in self.voice.synthesize("ready"):
+            pass
+
         print("[VOICE] Models ready.")
 
     # STT (speech-to-text)

@@ -286,7 +286,7 @@ class MultimodalRetriever:
             query=query_vec,
             using="image",
             query_filter=query_filter,
-            limit=60,
+            limit=30,
         ).points
 
         # normalize embedding score
@@ -294,7 +294,7 @@ class MultimodalRetriever:
             if p.score is not None:
                 p.score /= emb.shape[0]
 
-        hits = sorted(results, key=lambda x: x.score, reverse=True)[:25]
+        hits = sorted(results, key=lambda x: x.score, reverse=True)[:15]
 
         print(f"\nQdrant retrieval done | Candidates: {len(hits)}")
 
