@@ -36,10 +36,16 @@ def create_llm():
     Returns:
         ChatOpenAI
     """
-    return ChatOpenAI(
-        model_name="meta-llama/llama-4-scout-17b-16e-instruct",
-        openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
-        openai_api_base="https://openrouter.ai/api/v1",
+    # return ChatOpenAI(
+    #     model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+    #     openai_api_key=os.environ.get("OPENROUTER_API_KEY"),
+    #     openai_api_base="https://openrouter.ai/api/v1",
+    #     temperature=0.2,
+    #     max_tokens=1024,
+    # )
+    return ChatGroq(
+        model_name="llama-3.1-70b-versatile",  # or llama-3.1-8b-instant for speed
+        groq_api_key=os.environ.get("GROQ_API_KEY"),
         temperature=0.2,
         max_tokens=1024,
     )
