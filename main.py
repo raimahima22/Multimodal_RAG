@@ -80,14 +80,25 @@ def streaming_voice_pipeline(audio):
         answer = result.get("answer", "No response generated.")
         sources = result.get("sources", [])
 
-        clean_answer = answer.split("**Sources:")[0].strip()
-        clean_answer = clean_answer.replace("**", "").replace("\n\n", ". ").replace("\n", " ")
-        final_text = f"**{clean_answer}**"
+        answer_body = re.sub(r"\n\nSource documents used:.*$", "", answer, flags=re.DOTALL).strip()
+
+        # Text shown in the UI — keep paragraph/list structure intact for Markdown
+        display_text = answer_body
+        if sources:
+            display_text += f"\n\n*Source documents used: {', '.join(sources)}*"
+        final_text = display_text
+
+        # Text spoken by TTS — flatten line breaks so it reads naturally
+        speech_text = re.sub(r"\n+", ". ", answer_body).strip()
+
+        # clean_answer = answer.split("**Sources:")[0].strip()
+        # clean_answer = clean_answer.replace("**", "").replace("\n\n", ". ").replace("\n", " ")
+        # final_text = f"**{clean_answer}**"
 
         if sources:
             print(f"[VOICE] Sources: {', '.join(sources)}")
 
-        for chunk in vi.speak_stream(clean_answer):
+        for chunk in vi.speak_stream(speech_text):
             yield chunk, transcription_text, final_text
 
     except Exception as e:
@@ -186,10 +197,23 @@ def main(force_reindex: bool = False):
                         </ul> 
                         """)
 
-                voice_submit.click(
+                reset_event = voice_submit.click(
+                    fn=lambda: (None, "", ""),
+                    inputs=None,
+                    outputs=[voice_output_audio, transcription, voice_output_text],
+                )
+
+                run_event = reset_event.then(
                     streaming_voice_pipeline,
                     [audio_input],
                     [voice_output_audio, transcription, voice_output_text],
+                )
+
+                voice_submit.click(
+                    fn=lambda: None,
+                    inputs=None,
+                    outputs=None,
+                    cancels=[run_event],
                 )
 
         demo.launch(

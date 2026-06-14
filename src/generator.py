@@ -171,6 +171,7 @@ class MultimodalGenerator:
         - Use numbered lists when they improve readability
         - Do NOT explain step-by-step unless asked
         - Give answers with good formatting and structure
+        - Remove markdown symbols (#, *, **).
        
         
         
