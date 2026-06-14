@@ -44,7 +44,7 @@ def create_llm():
     #     max_tokens=1024,
     # )
     return ChatGroq(
-        model_name="llama-3.1-70b-versatile",  # or llama-3.1-8b-instant for speed
+        model_name="llama-3.3-70b-versatile",  # or llama-3.1-8b-instant for speed
         groq_api_key=os.environ.get("GROQ_API_KEY"),
         temperature=0.2,
         max_tokens=1024,
