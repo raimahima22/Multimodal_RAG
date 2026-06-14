@@ -19,12 +19,10 @@ from src.ui.templates import APP_HEADER, SIDEBAR, VOICE_HEADER
 
 HISTORY_FILE = "chat_history.json"
 
-# Load CSS from the external file — edit src/ui/styles.css to change the look
 _CSS_PATH = Path(__file__).parent / "src" / "ui" / "styles.css"
 
 
 def _load_css() -> str:
-    """Read styles.css at startup so hot-editing the file takes effect on restart."""
     try:
         return _CSS_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -32,10 +30,6 @@ def _load_css() -> str:
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Extra styles for the metrics strip — kept in the same Inter/stone palette
-# as src/ui/styles.css so it matches the rest of the UI.
-# ---------------------------------------------------------------------------
 _METRICS_CSS = """
 .metrics-strip {
     display: flex;
@@ -77,8 +71,6 @@ _METRICS_CSS = """
 """
 
 
-# Helpers
-
 def _aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
@@ -106,30 +98,13 @@ def save_to_history(query: str, answer: str, sources: list, latency: dict):
         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
 
-def _metrics_html(stt: float, agent: float, tts: float, tokens: dict | None) -> str:
+def _metrics_html(stt: float, agent: float, tts_latency: float) -> str:
     """
     Render a compact metrics strip.
-    Numbers shown as: STT | Agent | TTS | Total | Tokens in/out/total
+    TTS shows time-to-first-chunk (real processing latency), not full stream duration.
+    Token usage intentionally excluded.
     """
-    total = round(stt + agent + tts, 2)
-
-    tok_in = tokens.get("input_tokens") if tokens else None
-    tok_out = tokens.get("output_tokens") if tokens else None
-    tok_total = tokens.get("total_tokens") if tokens else None
-
-    def _fmt_tok(v):
-        return f"{v:,}" if v is not None else "—"
-
-    tok_html = (
-        f'<span class="met-item"><span class="met-label">Tokens in</span>'
-        f'<span class="met-val">{_fmt_tok(tok_in)}</span></span>'
-        f'<span class="met-sep">·</span>'
-        f'<span class="met-item"><span class="met-label">Tokens out</span>'
-        f'<span class="met-val">{_fmt_tok(tok_out)}</span></span>'
-        f'<span class="met-sep">·</span>'
-        f'<span class="met-item"><span class="met-label">Total tokens</span>'
-        f'<span class="met-val">{_fmt_tok(tok_total)}</span></span>'
-    )
+    total = round(stt + agent + tts_latency, 2)
 
     return f"""
 <div class="metrics-strip">
@@ -137,11 +112,9 @@ def _metrics_html(stt: float, agent: float, tts: float, tokens: dict | None) -> 
   <span class="met-sep">·</span>
   <span class="met-item"><span class="met-label">Agent</span><span class="met-val">{agent}s</span></span>
   <span class="met-sep">·</span>
-  <span class="met-item"><span class="met-label">TTS</span><span class="met-val">{tts}s</span></span>
+  <span class="met-item"><span class="met-label">TTS</span><span class="met-val">{tts_latency}s</span></span>
   <span class="met-sep">·</span>
   <span class="met-item"><span class="met-label">Total</span><span class="met-val">{total}s</span></span>
-  <span class="met-sep met-divider">|</span>
-  {tok_html}
 </div>
 """
 
@@ -154,6 +127,15 @@ def streaming_voice_pipeline(audio):
     """
     Full pipeline: audio file → STT → agent → TTS stream
     Yields: (audio_chunk, transcription, answer_text, metrics_html)
+
+    Timing notes:
+    - stt_time   : measured by vi.transcribe_audio() — wall time for the STT call
+    - agent_time : wall time for run_agent() only, excluding TTS
+    - tts_latency: time from TTS start until the FIRST chunk arrives
+                   (real processing latency; we don't count stream drain time
+                   because that is just network/playback, not work we did)
+    - Metrics are emitted alongside the first TTS chunk so the card appears
+      immediately when audio starts, not after the stream finishes.
     """
     if audio is None:
         yield None, "No audio received. Please record again.", "**Please record something.**", ""
@@ -161,12 +143,10 @@ def streaming_voice_pipeline(audio):
 
     transcription_text = "**Transcription failed.**"
     final_text = "**Processing failed.**"
-    metrics = ""
 
     stt_time = 0.0
     agent_time = 0.0
-    tts_time = 0.0
-    token_usage = None
+    tts_latency = 0.0
 
     try:
         vi = get_voice_interface(run_agent)
@@ -187,40 +167,50 @@ def streaming_voice_pipeline(audio):
 
         answer = result.get("answer", "No response generated.")
         sources = result.get("sources", [])
-        token_usage = result.get("token_usage")
 
-        # Strip the "Source documents used: ..." line for the display text
         answer_body = re.sub(r"\n\nSource documents used:.*$", "", answer, flags=re.DOTALL).strip()
 
-        # Text shown in the UI — keep paragraph/list structure intact for Markdown
         display_text = answer_body
         if sources:
             display_text += f"\n\n*Source documents used: {', '.join(sources)}*"
         final_text = display_text
 
-        # Text spoken by TTS — flatten line breaks so it reads naturally
         speech_text = re.sub(r"\n+", ". ", answer_body).strip()
 
         if sources:
             print(f"[VOICE] Sources: {', '.join(sources)}")
 
         # ── 3. TTS (streaming) ────────────────────────────────────────────
+        # We only measure until the first chunk arrives — that is the true
+        # TTS processing latency.  After that, streaming is just playback.
         tts_start = time.time()
-        for chunk in vi.speak_stream(speech_text):
-            yield chunk, transcription_text, final_text, ""
-        tts_time = round(time.time() - tts_start, 2)
+        first_chunk = True
+        metrics = ""
 
-        # ── 4. Final metrics update ───────────────────────────────────────
-        metrics = _metrics_html(stt_time, agent_time, tts_time, token_usage)
+        for chunk in vi.speak_stream(speech_text):
+            if first_chunk:
+                # Time-to-first-chunk = real TTS latency
+                tts_latency = round(time.time() - tts_start, 2)
+                metrics = _metrics_html(stt_time, agent_time, tts_latency)
+                first_chunk = False
+
+            # Emit metrics alongside every chunk (Gradio replaces the HTML
+            # component in place, so this is cheap and keeps it visible).
+            yield chunk, transcription_text, final_text, metrics
+
+        # ── 4. Persist history (uses tts_latency, not full stream time) ───
         save_to_history(query, answer, sources, {
             "stt_time": stt_time,
             "agent_time": agent_time,
-            "tts_time": tts_time,
-            "total_time": round(stt_time + agent_time + tts_time, 2),
+            "tts_latency": tts_latency,
+            "total_time": round(stt_time + agent_time + tts_latency, 2),
         })
 
-        # Emit one last update with the metrics filled in
-        yield None, transcription_text, final_text, metrics
+        # Final yield in case TTS produced no chunks (edge-case guard)
+        if first_chunk:
+            tts_latency = round(time.time() - tts_start, 2)
+            metrics = _metrics_html(stt_time, agent_time, tts_latency)
+            yield None, transcription_text, final_text, metrics
 
     except Exception as e:
         print(f"[VOICE ERROR] {e}")
@@ -231,10 +221,6 @@ def streaming_voice_pipeline(audio):
         clear_page_cache()
 
 
-# ---------------------------------------------------------------------------
-# Sidebar extra: example questions (kept in the sidebar, using the same
-# CSS classes as the "Powered By" block in templates.py)
-# ---------------------------------------------------------------------------
 SIDEBAR_EXAMPLES = """
 <div class="sidebar-divider"></div>
 
@@ -260,7 +246,7 @@ def main(force_reindex: bool = False):
     print("System ready.\n")
 
     voice_interface = get_voice_interface(run_agent)
-    custom_css = _load_css() + _METRICS_CSS  # ← styles.css + metrics-strip styles
+    custom_css = _load_css() + _METRICS_CSS
 
     with gr.Blocks(
         css=custom_css,
@@ -272,18 +258,16 @@ def main(force_reindex: bool = False):
         ),
     ) as demo:
 
-        gr.HTML(APP_HEADER)  # ← from src/ui/templates.py
+        gr.HTML(APP_HEADER)
 
         with gr.Row(elem_id=["layout-shell"]):
 
-            # ───────────────── Sidebar ─────────────────
             with gr.Column(elem_id="sidebar", scale=0, min_width=240):
-                gr.HTML(SIDEBAR)        # ← from src/ui/templates.py
-                gr.HTML(SIDEBAR_EXAMPLES)  # ← example questions, kept in sidebar
+                gr.HTML(SIDEBAR)
+                gr.HTML(SIDEBAR_EXAMPLES)
 
-            # ── Voice Assistant ────────────────────────────────────────────
             with gr.Column(elem_id="main-content", scale=1):
-                gr.HTML(VOICE_HEADER)  # ← from src/ui/templates.py
+                gr.HTML(VOICE_HEADER)
 
                 with gr.Column(elem_id="voice-body"):
 
