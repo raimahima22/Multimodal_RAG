@@ -1,12 +1,54 @@
-torch
+# =========================
+# CORE DEEP LEARNING STACK
+# =========================
+torch --index-url https://download.pytorch.org/whl/cu118
+torchvision --index-url https://download.pytorch.org/whl/cu118
+torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+transformers>=4.45.0,<5.0.0
+accelerate
+
+# PEFT (STRICT as requested)
+peft==0.18.1
+
+# =========================
+# MULTIMODAL RAG CORE
+# =========================
 colpali-engine
-transformers
-langchain
 qdrant-client
+
+# =========================
+# LANGCHAIN STACK
+# =========================
+langchain
+langchain-core
+langchain-openai
+langchain-groq
+
+# =========================
+# OCR + DOCUMENT PROCESSING
+# =========================
+pymupdf
+pdf2image
+pytesseract
+easyocr
 pillow
-python-dotenv
-faster-whisper
-TTS
-sounddevice
-numpy
-gradio
+
+# =========================
+# AUDIO / SPEECH PIPELINE
+# =========================
+faster-whisper==1.2.1
+piper-tts
+coqui-tts
+sounddevice==0.5.2
+
+# =========================
+# UI LAYER
+# =========================
+gradio==5.34.2
+
+# =========================
+# UTILITIES
+# =========================
+numpy==2.3.0
+tqdm
