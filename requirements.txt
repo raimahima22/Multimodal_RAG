@@ -5,7 +5,7 @@ torch --index-url https://download.pytorch.org/whl/cu118
 torchvision --index-url https://download.pytorch.org/whl/cu118
 torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-transformers>=4.45.0,<5.0.0
+transformers==5.5.4
 accelerate
 
 # PEFT (STRICT as requested)
@@ -52,3 +52,9 @@ gradio==5.34.2
 # =========================
 numpy==2.3.0
 tqdm
+
+# =========================
+# TESTING / DEVELOPMENT
+# =========================
+pytest
+pytest-html
