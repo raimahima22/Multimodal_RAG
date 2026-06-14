@@ -15,29 +15,75 @@ from src.utils import clear_page_cache
 from src.agent import run_agent
 from src.tools import preload_all_models
 from src.voice import get_voice_interface
+from src.ui.templates import APP_HEADER, SIDEBAR, VOICE_HEADER
 
 HISTORY_FILE = "chat_history.json"
 
+# Load CSS from the external file — edit src/ui/styles.css to change the look
 _CSS_PATH = Path(__file__).parent / "src" / "ui" / "styles.css"
 
 
 def _load_css() -> str:
+    """Read styles.css at startup so hot-editing the file takes effect on restart."""
     try:
         return _CSS_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
-        print(f"[WARNING] CSS file not found at {_CSS_PATH}.")
+        print(f"[WARNING] CSS file not found at {_CSS_PATH}. Falling back to no styles.")
         return ""
 
+
+# ---------------------------------------------------------------------------
+# Extra styles for the metrics strip — kept in the same Inter/stone palette
+# as src/ui/styles.css so it matches the rest of the UI.
+# ---------------------------------------------------------------------------
+_METRICS_CSS = """
+.metrics-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    font-family: 'Inter', sans-serif;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 0.5px solid #DDDBD2;
+}
+.met-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+.met-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #A8A695;
+}
+.met-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1C1C1A;
+    font-variant-numeric: tabular-nums;
+}
+.met-sep {
+    color: #DDDBD2;
+    padding: 0 2px;
+}
+.met-divider {
+    font-size: 16px;
+    color: #DDDBD2;
+}
+"""
+
+
+# Helpers
 
 def _aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-
-# ---------------------------------------------------------------------------
-# History
-# ---------------------------------------------------------------------------
 
 def save_to_history(query: str, answer: str, sources: list, latency: dict):
     history_data = []
@@ -60,18 +106,14 @@ def save_to_history(query: str, answer: str, sources: list, latency: dict):
         json.dump(history_data, f, indent=2, ensure_ascii=False)
 
 
-# ---------------------------------------------------------------------------
-# Metrics HTML builder
-# ---------------------------------------------------------------------------
-
 def _metrics_html(stt: float, agent: float, tts: float, tokens: dict | None) -> str:
     """
     Render a compact metrics strip.
-    Numbers shown as:  STT  |  Agent  |  TTS  |  Tokens
+    Numbers shown as: STT | Agent | TTS | Total | Tokens in/out/total
     """
     total = round(stt + agent + tts, 2)
 
-    tok_in  = tokens.get("input_tokens")  if tokens else None
+    tok_in = tokens.get("input_tokens") if tokens else None
     tok_out = tokens.get("output_tokens") if tokens else None
     tok_total = tokens.get("total_tokens") if tokens else None
 
@@ -110,20 +152,20 @@ def _metrics_html(stt: float, agent: float, tts: float, tokens: dict | None) -> 
 
 def streaming_voice_pipeline(audio):
     """
-    Full pipeline:  audio file → STT → agent → TTS stream
-    Yields:         (audio_chunk, transcription, answer_text, metrics_html)
+    Full pipeline: audio file → STT → agent → TTS stream
+    Yields: (audio_chunk, transcription, answer_text, metrics_html)
     """
     if audio is None:
-        yield None, "No audio received. Please record again.", "", ""
+        yield None, "No audio received. Please record again.", "**Please record something.**", ""
         return
 
-    transcription_text = ""
-    final_text = ""
+    transcription_text = "**Transcription failed.**"
+    final_text = "**Processing failed.**"
     metrics = ""
 
-    stt_time   = 0.0
+    stt_time = 0.0
     agent_time = 0.0
-    tts_time   = 0.0
+    tts_time = 0.0
     token_usage = None
 
     try:
@@ -133,43 +175,39 @@ def streaming_voice_pipeline(audio):
         query, stt_time = vi.transcribe_audio(audio)
 
         if not query or not query.strip():
-            yield None, "Could not understand the audio. Please try again.", "", ""
+            yield None, "Could not understand audio.", "**Try speaking more clearly.**", ""
             return
 
-        transcription_text = query
+        transcription_text = f"{query}"
 
         # ── 2. Agent ──────────────────────────────────────────────────────
         t0 = time.time()
         result = run_agent(query)
         agent_time = round(time.time() - t0, 2)
 
-        answer     = result.get("answer", "No response generated.")
-        sources    = result.get("sources", [])
+        answer = result.get("answer", "No response generated.")
+        sources = result.get("sources", [])
         token_usage = result.get("token_usage")
 
         # Strip the "Source documents used: ..." line for the display text
-        # (we show sources separately in the metrics strip)
-        answer_body = re.sub(
-            r"\n\nSource documents used:.*$", "", answer, flags=re.DOTALL
-        ).strip()
+        answer_body = re.sub(r"\n\nSource documents used:.*$", "", answer, flags=re.DOTALL).strip()
 
+        # Text shown in the UI — keep paragraph/list structure intact for Markdown
         display_text = answer_body
         if sources:
-            display_text += f"\n\n*Sources: {', '.join(sources)}*"
+            display_text += f"\n\n*Source documents used: {', '.join(sources)}*"
         final_text = display_text
 
-        # Text for TTS — flatten newlines so it reads naturally
+        # Text spoken by TTS — flatten line breaks so it reads naturally
         speech_text = re.sub(r"\n+", ". ", answer_body).strip()
+
+        if sources:
+            print(f"[VOICE] Sources: {', '.join(sources)}")
 
         # ── 3. TTS (streaming) ────────────────────────────────────────────
         tts_start = time.time()
-        first_chunk = True
         for chunk in vi.speak_stream(speech_text):
-            if first_chunk:
-                # TTS started — update metrics with partial info
-                first_chunk = False
             yield chunk, transcription_text, final_text, ""
-
         tts_time = round(time.time() - tts_start, 2)
 
         # ── 4. Final metrics update ───────────────────────────────────────
@@ -185,8 +223,8 @@ def streaming_voice_pipeline(audio):
         yield None, transcription_text, final_text, metrics
 
     except Exception as e:
-        print(f"[PIPELINE ERROR] {e}")
-        yield None, transcription_text, f"An error occurred: {str(e)}", ""
+        print(f"[VOICE ERROR] {e}")
+        yield None, transcription_text, f"Error: {str(e)}", ""
 
     finally:
         _aggressive_cleanup()
@@ -194,84 +232,24 @@ def streaming_voice_pipeline(audio):
 
 
 # ---------------------------------------------------------------------------
-# Gradio UI
+# Sidebar extra: example questions (kept in the sidebar, using the same
+# CSS classes as the "Powered By" block in templates.py)
 # ---------------------------------------------------------------------------
+SIDEBAR_EXAMPLES = """
+<div class="sidebar-divider"></div>
 
-_HEADER_HTML = """
-<div style="padding: 1.5rem 0 0.5rem; border-bottom: 0.5px solid var(--border-color-primary, #e0e0e0);">
-  <div style="font-size: 1.25rem; font-weight: 500; color: var(--body-text-color, #1a1a1a);">
-    Healthcare Benefits Assistant
-  </div>
-  <div style="font-size: 0.85rem; color: var(--body-text-color-subdued, #666); margin-top: 4px;">
-    Ask questions about your SBC and SPD documents using your voice
-  </div>
-</div>
-"""
-
-_SIDEBAR_HTML = """
-<div style="padding: 1rem 0;">
-  <div style="font-size: 0.75rem; font-weight: 500; letter-spacing: 0.06em;
-              text-transform: uppercase; color: var(--body-text-color-subdued, #888);
-              margin-bottom: 0.75rem;">
-    Document sources
-  </div>
-  <div style="font-size: 0.85rem; color: var(--body-text-color, #333); line-height: 2;">
-    <div style="display:flex; align-items:center; gap:8px; padding: 4px 0;">
-      <span style="width:8px; height:8px; border-radius:50%; background:#1D9E75; flex-shrink:0;"></span>
-      SBC — Summary of Benefits &amp; Coverage
-    </div>
-    <div style="display:flex; align-items:center; gap:8px; padding: 4px 0;">
-      <span style="width:8px; height:8px; border-radius:50%; background:#378ADD; flex-shrink:0;"></span>
-      SPD — Summary Plan Description
-    </div>
-  </div>
-
-  <div style="font-size: 0.75rem; font-weight: 500; letter-spacing: 0.06em;
-              text-transform: uppercase; color: var(--body-text-color-subdued, #888);
-              margin-top: 1.5rem; margin-bottom: 0.75rem;">
-    Example questions
-  </div>
-  <div style="font-size: 0.82rem; color: var(--body-text-color, #333); line-height: 2;">
-    <div>What is the deductible for this plan?</div>
-    <div>What services are covered under preventive care?</div>
-    <div>What is the out-of-pocket maximum?</div>
-    <div>Tell me about eligibility rules.</div>
-    <div>How do I file a claim?</div>
-    <div>What services are excluded?</div>
-  </div>
-</div>
-"""
-
-# Inline CSS — keeps the project self-contained even if styles.css is missing
-_INLINE_CSS = """
-.metrics-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 4px;
-  font-size: 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--background-fill-secondary, #f8f8f8);
-  border: 0.5px solid var(--border-color-primary, #e0e0e0);
-  margin-top: 8px;
-  color: var(--body-text-color-subdued, #666);
-}
-.met-item { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-.met-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
-.met-val { font-size: 13px; font-weight: 500; color: var(--body-text-color, #333); font-variant-numeric: tabular-nums; }
-.met-sep { opacity: 0.3; padding: 0 2px; }
-.met-divider { font-size: 16px; }
-.voice-section-label {
-  font-size: 11px; font-weight: 500; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--body-text-color-subdued, #888);
-  margin-bottom: 6px;
-}
+<div class="sidebar-stack-label">Example Questions</div>
+<div class="sidebar-stack-item">What is the deductible for this plan?</div>
+<div class="sidebar-stack-item">What services are covered under preventive care?</div>
+<div class="sidebar-stack-item">What is the out-of-pocket maximum?</div>
+<div class="sidebar-stack-item">Tell me about eligibility rules.</div>
+<div class="sidebar-stack-item">How do I file a claim?</div>
+<div class="sidebar-stack-item">What services are excluded?</div>
 """
 
 
 def main(force_reindex: bool = False):
-    print("\nInitialising Healthcare Benefits Assistant...\n")
+    print("\nInitializing Healthcare Benefits Assistant...\n")
     preload_all_models()
 
     print("Running warm-up query...")
@@ -281,7 +259,8 @@ def main(force_reindex: bool = False):
         print(f"[WARMUP] Non-fatal: {e}")
     print("System ready.\n")
 
-    custom_css = _load_css() + _INLINE_CSS
+    voice_interface = get_voice_interface(run_agent)
+    custom_css = _load_css() + _METRICS_CSS  # ← styles.css + metrics-strip styles
 
     with gr.Blocks(
         css=custom_css,
@@ -293,76 +272,76 @@ def main(force_reindex: bool = False):
         ),
     ) as demo:
 
-        gr.HTML(_HEADER_HTML)
+        gr.HTML(APP_HEADER)  # ← from src/ui/templates.py
 
-        with gr.Row():
+        with gr.Row(elem_id=["layout-shell"]):
 
-            # ── Sidebar ───────────────────────────────────────────────────
-            with gr.Column(scale=0, min_width=220):
-                gr.HTML(_SIDEBAR_HTML)
+            # ───────────────── Sidebar ─────────────────
+            with gr.Column(elem_id="sidebar", scale=0, min_width=240):
+                gr.HTML(SIDEBAR)        # ← from src/ui/templates.py
+                gr.HTML(SIDEBAR_EXAMPLES)  # ← example questions, kept in sidebar
 
-            # ── Main panel ────────────────────────────────────────────────
-            with gr.Column(scale=1):
+            # ── Voice Assistant ────────────────────────────────────────────
+            with gr.Column(elem_id="main-content", scale=1):
+                gr.HTML(VOICE_HEADER)  # ← from src/ui/templates.py
 
-                # Record
-                gr.HTML('<div class="voice-section-label">Record your question</div>')
-                audio_input = gr.Audio(
-                    sources=["microphone", "upload"],
-                    type="filepath",
-                    show_label=False,
-                    waveform_options=gr.WaveformOptions(waveform_color="#1C1C1A"),
-                )
-                submit_btn = gr.Button("Ask", variant="primary")
+                with gr.Column(elem_id="voice-body"):
 
-                with gr.Row():
-                    # Transcription
-                    with gr.Column(scale=1):
-                        gr.HTML('<div class="voice-section-label">Transcription</div>')
-                        transcription_box = gr.Textbox(
-                            show_label=False,
-                            placeholder="Your spoken words appear here…",
-                            lines=3,
-                            interactive=False,
+                    with gr.Column(elem_classes=["voice-card"]):
+                        gr.HTML('<div class="voice-card-label">Record Question</div>')
+                        audio_input = gr.Audio(
+                            sources=["microphone", "upload"], type="filepath",
+                            label=None, show_label=False,
+                            waveform_options=gr.WaveformOptions(waveform_color="#1C1C1A"),
+                        )
+                        voice_submit = gr.Button(
+                            "Process voice query", variant="primary",
+                            elem_id="voice-submit-btn",
                         )
 
-                    # Answer
-                    with gr.Column(scale=2):
-                        gr.HTML('<div class="voice-section-label">Answer</div>')
-                        answer_box = gr.Markdown(show_label=False)
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            with gr.Column(elem_classes=["voice-card"]):
+                                gr.HTML('<div class="voice-card-label">Transcription</div>')
+                                transcription = gr.Textbox(
+                                    label=None, show_label=False,
+                                    placeholder="Your spoken words appear here…",
+                                    lines=3, interactive=False,
+                                    elem_id="transcription-box",
+                                )
+                        with gr.Column(scale=2):
+                            with gr.Column(elem_classes=["voice-card"]):
+                                gr.HTML('<div class="voice-card-label">Agent Response</div>')
+                                voice_output_text = gr.Markdown(
+                                    label=None, elem_id="response-box"
+                                )
+                                metrics_box = gr.HTML(label=None)
 
-                # Metrics strip
-                metrics_box = gr.HTML(label=None)
+                    with gr.Column(elem_classes=["voice-card"]):
+                        gr.HTML('<div class="voice-card-label">Spoken Response</div>')
+                        voice_output_audio = gr.Audio(
+                            label=None, show_label=False, streaming=True,
+                            autoplay=True, interactive=False, show_download_button=True,
+                        )
 
-                # Spoken response
-                gr.HTML('<div class="voice-section-label" style="margin-top:8px;">Spoken response</div>')
-                audio_output = gr.Audio(
-                    show_label=False,
-                    streaming=True,
-                    autoplay=True,
-                    interactive=False,
-                    show_download_button=True,
+                reset_event = voice_submit.click(
+                    fn=lambda: (None, "", "", ""),
+                    inputs=None,
+                    outputs=[voice_output_audio, transcription, voice_output_text, metrics_box],
                 )
 
-        # ── Event wiring ──────────────────────────────────────────────────
-        reset_event = submit_btn.click(
-            fn=lambda: (None, "", "", ""),
-            inputs=None,
-            outputs=[audio_output, transcription_box, answer_box, metrics_box],
-        )
+                run_event = reset_event.then(
+                    streaming_voice_pipeline,
+                    [audio_input],
+                    [voice_output_audio, transcription, voice_output_text, metrics_box],
+                )
 
-        run_event = reset_event.then(
-            fn=streaming_voice_pipeline,
-            inputs=[audio_input],
-            outputs=[audio_output, transcription_box, answer_box, metrics_box],
-        )
-
-        # Allow cancellation by clicking Ask again
-        submit_btn.click(
-            fn=lambda: None,
-            inputs=None,
-            outputs=None,
-            cancels=[run_event],
-        )
+                voice_submit.click(
+                    fn=lambda: None,
+                    inputs=None,
+                    outputs=None,
+                    cancels=[run_event],
+                )
 
         demo.launch(
             share=True,

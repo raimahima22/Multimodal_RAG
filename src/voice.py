@@ -10,9 +10,15 @@ import gc
 from faster_whisper import WhisperModel
 from piper import PiperVoice
 
-MODEL_PATH = os.environ.get(
-    "PIPER_MODEL_PATH",
-    "models/en_US-amy-medium.onnx"          # default: local ./models/ folder
+# MODEL_PATH = os.environ.get(
+#     "PIPER_MODEL_PATH",
+#     "models/en_US-amy-medium.onnx"         
+# )
+
+
+MODEL_PATH = os.path.join(
+    "/content/drive/MyDrive/piper_models",
+    "en_US-amy-medium.onnx"
 )
 
 
