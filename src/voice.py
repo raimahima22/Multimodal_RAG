@@ -43,12 +43,12 @@ class VoiceInterface:
                                    and returns agent response.
         """
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute = "float16" if self.device == "cuda" else "int8"
+        # self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # compute = "float16" if self.device == "cuda" else "int8"
 
         self.agent_func = agent_func
-        # self.device = "cpu"   # whisper runs fine on CPU
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cpu"   # whisper runs fine on CPU
+    
 
 
         # STT (speech-to-text model initialization)
@@ -56,7 +56,7 @@ class VoiceInterface:
         self.stt_model = WhisperModel(
             "base.en",
             device=self.device,
-            compute_type=compute,
+            compute_type="int8",
         )
 
         # TTS (text-to-speech model initialization)
