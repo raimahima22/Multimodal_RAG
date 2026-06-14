@@ -8,6 +8,7 @@ from typing import TypedDict, Annotated, List, Dict
 import operator
 import json
 from dotenv import load_dotenv
+import re
 
 from src.tools import search_sbc, search_spd
 from src.generator import create_llm
@@ -31,8 +32,24 @@ _FALLBACK_MESSAGE = (
     "Please try rephrasing, or contact your plan administrator directly."
 )
 
+def format_answer(text: str) -> str:
+    """Remove markdown symbols and clean formatting."""
 
-# ========================== TOOLS with Logging ==========================
+    # Remove markdown headers
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+
+    # Remove bullets (* - •)
+    text = re.sub(r"^\s*[\*\-•]\s*", "", text, flags=re.MULTILINE)
+
+    # Remove bold markers
+    text = text.replace("**", "")
+
+    # Remove excessive blank lines
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+
+    return text.strip()
+
+#TOOLS with Logging 
 @tool
 def search_sbc_tool(query: str) -> str:
     """Use ONLY for quick benefit summaries, costs, deductibles, copays, coinsurance, out-of-pocket maximums."""
@@ -60,7 +77,7 @@ class AgentState(TypedDict):
     sources: Annotated[List[str], operator.add]
 
 
-# ========================== ROUTER with Logging ==========================
+# ROUTER with Logging 
 def route_query(query: str) -> str:
     """Force routing decision every time"""
     print(f" [ROUTER] Analyzing query: {query[:100]}...")
@@ -72,7 +89,7 @@ def route_query(query: str) -> str:
 
     Choose ONLY one:
     - SBC → costs, deductibles, copays, coverage summary, out-of-pocket, quick benefits
-    - SPD → rules, eligibility, exclusions, procedures, definitions, legal, claims
+    - SPD → rules, eligibility, exclusions, procedures, definitions, legal, claims, policy, HIPAA, PPO plan
 
     Answer with only one word: SBC or SPD
     """
@@ -134,6 +151,7 @@ def final_answer_node(state: AgentState):
         if content.strip().startswith('{') and '"answer"' in content:
             data = json.loads(content)
             clean_answer = data.get("answer", content)
+            clean_answer = format_answer(clean_answer)
         else:
             clean_answer = content
     except:
@@ -146,7 +164,10 @@ def final_answer_node(state: AgentState):
 
     # Create nice final response
     if sources:
-        final_content = f"{clean_answer}\n\n**Sources:** {', '.join(sources)}"
+        final_content = (
+           f"{clean_answer}"
+           f"\n\nSource documents used: {', '.join(sources)}"
+        )
     else:
         final_content = clean_answer
 
