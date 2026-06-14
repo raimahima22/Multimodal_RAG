@@ -295,9 +295,6 @@ agent_node → tools_node → final_answer_node
 ```bash
 python main.py
 ```
-
-The app is available at `http://localhost:7860`. A public share link is also printed on startup.
-
 ### Metrics strip
 
 Every response displays:
@@ -309,18 +306,6 @@ Every response displays:
 | TTS | Time-to-first-chunk for speech synthesis |
 | Total | Sum of all three |
 
-### Observed latency (Colab T4 GPU)
-
-| Stage | Typical range |
-|---|---|
-| STT (faster-whisper base.en, CPU) | 1.5 – 3.5 s |
-| Agent (retrieval + Llama 4 Scout via OpenRouter) | 8 – 20 s |
-| TTS (Piper, CPU) | 1 – 4 s (scales with answer length) |
-| **End-to-end** | **~12 – 28 s** |
-
-The dominant cost is the agent step. Reducing `top_k` in retrieval from 3 to 2 pages shaves ~2 s off the generator call.
-
----
 
 ## Testing
 

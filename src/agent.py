@@ -15,9 +15,7 @@ from src.generator import create_llm
 load_dotenv()
 llm = create_llm()
 
-# ---------------------------------------------------------------------------
 # Phrases that indicate the tool returned nothing useful
-# ---------------------------------------------------------------------------
 _NO_RESULT_PHRASES = [
     "no relevant information found",
     "answer not found in provided documents",
@@ -41,11 +39,17 @@ _FALLBACK_MESSAGE = (
 
 
 def _is_empty_result(text: str) -> bool:
+    """
+    Detect whether a tool output indicates no useful retrieved content.
+    """
     lowered = text.lower().strip()
     return any(phrase in lowered for phrase in _NO_RESULT_PHRASES)
 
 
 def _is_vague_answer(text: str) -> bool:
+    """
+    Detect whether an LLM response is non-informative or uncertain.
+    """
     lowered = text.lower().strip()
     return any(phrase in lowered for phrase in _VAGUE_ANSWER_PHRASES)
 
@@ -59,9 +63,7 @@ def format_answer(text: str) -> str:
     return text.strip()
 
 
-# ---------------------------------------------------------------------------
 # Tool definitions
-# ---------------------------------------------------------------------------
 
 @tool
 def search_sbc_tool(query: str) -> str:
@@ -95,20 +97,18 @@ tools = [search_sbc_tool, search_spd_tool]
 llm_with_tools = llm.bind_tools(tools)
 
 
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
+# Agent State (shared across graph nodes)
 
 class AgentState(TypedDict):
+    """
+    Shared state object used across LangGraph nodes.
+    """
     messages: Annotated[List, operator.add]
     sources: Annotated[List[str], operator.add]
     routing: Optional[str]          # "sbc" | "spd" | "both"
-    token_usage: Optional[Dict]     # input/output/total tokens from generator
 
 
-# ---------------------------------------------------------------------------
 # Router — determines which tool(s) the query needs
-# ---------------------------------------------------------------------------
 
 # Keywords that strongly suggest each document type
 _SBC_KEYWORDS = {
@@ -174,9 +174,7 @@ Reply with exactly one word: SBC, SPD, or BOTH"""
         return "spd"
 
 
-# ---------------------------------------------------------------------------
 # Nodes
-# ---------------------------------------------------------------------------
 
 def agent_node(state: AgentState):
     """
@@ -305,11 +303,13 @@ def final_answer_node(state: AgentState):
     return {"messages": [AIMessage(content=final_content)]}
 
 
-# ---------------------------------------------------------------------------
-# Graph
-# ---------------------------------------------------------------------------
-
 def build_agent():
+    """
+    Builds and compiles the LangGraph workflow.
+
+    Flow:
+        agent → tools → final_answer → END
+    """
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tools_node)

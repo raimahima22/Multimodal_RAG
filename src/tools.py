@@ -9,6 +9,9 @@ _spd_retriever = None
 _generator = None
 
 def normalize(x):
+    """
+    Normalize different model outputs into a clean string format.
+    """
     if isinstance(x, list):
         return " ".join(map(str, x))
     if isinstance(x, dict):
@@ -16,7 +19,21 @@ def normalize(x):
     return str(x)
 
 def _get_shared_indexer(collection_name: str):
-    """Get or create indexer for a specific collection."""
+    """
+    Retrieve or create a MultimodalIndexer for a given vector collection.
+
+    This function ensures:
+    - One indexer per collection (singleton per collection)
+    - Efficient reuse across multiple queries
+    - No redundant reinitialization of vector DB connections
+
+    Args:
+        collection_name (str): Name of the vector DB collection
+                               (e.g., 'sbc_collection', 'spd_collection')
+
+    Returns:
+        MultimodalIndexer: Initialized or cached indexer instance
+    """
     global _shared_indexers
     
     if collection_name not in _shared_indexers:
@@ -30,6 +47,9 @@ def _get_shared_indexer(collection_name: str):
     return _shared_indexers[collection_name]
 
 def _get_sbc_retriever():
+    """
+    Lazy-load retriever for SBC (benefits & coverage documents).
+    """
     global _sbc_retriever
     if _sbc_retriever is None:
         indexer = _get_shared_indexer("sbc_collection")
@@ -37,6 +57,9 @@ def _get_sbc_retriever():
     return _sbc_retriever
 
 def _get_spd_retriever():
+    """
+    Lazy-load retriever for SPD (plan rules & legal documents).
+    """
     global _spd_retriever
     if _spd_retriever is None:
         indexer = _get_shared_indexer("spd_collection")
@@ -44,6 +67,10 @@ def _get_spd_retriever():
     return _spd_retriever
 
 def _get_generator():
+    """
+    Lazy-load multimodal generator used to synthesize final answers
+    from retrieved context chunks.
+    """
     global _generator
     if _generator is None:
         _generator = MultimodalGenerator()
@@ -81,9 +108,16 @@ def search_spd(query: str) -> str:
 
     return answer
 
-# Add this at the bottom of src/tools.py (after all existing functions)
 
 def preload_all_models():
+    """
+    Preload all heavy components (indexers, retrievers, generator).
+
+    Purpose:
+    - Reduce cold-start latency
+    - Load vector DB connections early
+    - Warm up embeddings + LLM pipelines
+    """
     print(" Preloading all models and indexers...")
     
     try:
