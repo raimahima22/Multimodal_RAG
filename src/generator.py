@@ -15,7 +15,8 @@ from groq import RateLimitError
 import time
 
 #load environment variables from .env file
-load_dotenv('/content/drive/MyDrive/.env')
+# load_dotenv('/content/drive/MyDrive/.env')
+load_dotenv("/content/.env")
 # load_dotenv()
 
 def create_llm():

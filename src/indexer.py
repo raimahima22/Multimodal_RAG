@@ -169,7 +169,8 @@ class MultimodalIndexer:
         
         if _shared_qdrant_client is None:
             print("Creating shared Qdrant client")
-            _shared_qdrant_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
+            # _shared_qdrant_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
+            _shared_qdrant_client = QdrantClient(path="/content/final_qdrant_db")
         self.local_client = _shared_qdrant_client
 
         print("Model and processor loaded successfully.")

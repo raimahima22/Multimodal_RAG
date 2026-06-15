@@ -17,8 +17,13 @@ from piper import PiperVoice
 # )
 
 
+# MODEL_PATH = os.path.join(
+#     "/content/drive/MyDrive/piper_models",
+#     "en_US-amy-medium.onnx"
+# )
+
 MODEL_PATH = os.path.join(
-    "/content/drive/MyDrive/piper_models",
+    "/content/piper_models",
     "en_US-amy-medium.onnx"
 )
 
