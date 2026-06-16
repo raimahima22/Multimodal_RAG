@@ -125,24 +125,7 @@ class MultimodalIndexer:
         print(f"Loading model  → {self.model_name}")
         print(f"Chunk size: {self.chunk_size}px | Overlap: {self.overlap}px")
 
-        
-        #load processor and model
-        # self.model = ColQwen2_5.from_pretrained(
-        #     self.model_name,
-        #     torch_dtype=self.torch_dtype,
-        #     trust_remote_code=True,
-        #     # low_cpu_mem_usage=True,
-        #     device_map="auto",
-        #     attn_implementation ="flash_attention_2" if is_flash_attn_2_available() else None,
-    
-        # ).eval()
-        
-        # #initialize Qdrant
-        # self.processor = ColQwen2_5_Processor.from_pretrained(
-        #     self.model_name,
-        #     trust_remote_code=True
-        # )
-        # === SHARE MODEL & PROCESSOR ===
+        # SHARE MODEL & PROCESSOR 
         global _shared_model, _shared_processor, _shared_qdrant_client
         
         if _shared_model is None:
@@ -174,10 +157,6 @@ class MultimodalIndexer:
         self.local_client = _shared_qdrant_client
 
         print("Model and processor loaded successfully.")
-
-        # self.local_client = QdrantClient(path="/content/drive/MyDrive/final_qdrant_db")
-        # self.local_client = QdrantClient(path="./final_qdrant_db")
-
 
         if force_recreate:
             self._recreate_collection()

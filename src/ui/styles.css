@@ -342,3 +342,41 @@ footer { display: none !important; }
     padding: 14px 16px !important;
     line-height: 1.7 !important;
 }
+
+.metrics-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    font-family: 'Inter', sans-serif;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 0.5px solid #DDDBD2;
+}
+.met-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+.met-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #A8A695;
+}
+.met-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1C1C1A;
+    font-variant-numeric: tabular-nums;
+}
+.met-sep {
+    color: #DDDBD2;
+    padding: 0 2px;
+}
+.met-divider {
+    font-size: 16px;
+    color: #DDDBD2;
+}

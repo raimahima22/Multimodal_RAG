@@ -30,47 +30,6 @@ def _load_css() -> str:
         return ""
 
 
-_METRICS_CSS = """
-.metrics-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 16px;
-    font-family: 'Inter', sans-serif;
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 0.5px solid #DDDBD2;
-}
-.met-item {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-}
-.met-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #A8A695;
-}
-.met-val {
-    font-size: 13px;
-    font-weight: 500;
-    color: #1C1C1A;
-    font-variant-numeric: tabular-nums;
-}
-.met-sep {
-    color: #DDDBD2;
-    padding: 0 2px;
-}
-.met-divider {
-    font-size: 16px;
-    color: #DDDBD2;
-}
-"""
-
-
 def _aggressive_cleanup():
     gc.collect()
     if torch.cuda.is_available():
@@ -118,10 +77,7 @@ def _metrics_html(stt: float, agent: float, tts_latency: float) -> str:
 </div>
 """
 
-
-# ---------------------------------------------------------------------------
 # Streaming voice pipeline
-# ---------------------------------------------------------------------------
 
 def streaming_voice_pipeline(audio):
     """
@@ -151,7 +107,7 @@ def streaming_voice_pipeline(audio):
     try:
         vi = get_voice_interface(run_agent)
 
-        # ── 1. STT ────────────────────────────────────────────────────────
+        # 1. STT 
         query, stt_time = vi.transcribe_audio(audio)
 
         if not query or not query.strip():
@@ -160,7 +116,7 @@ def streaming_voice_pipeline(audio):
 
         transcription_text = f"{query}"
 
-        # ── 2. Agent ──────────────────────────────────────────────────────
+        # 2. Agent 
         t0 = time.time()
         result = run_agent(query)
         agent_time = round(time.time() - t0, 2)
@@ -180,7 +136,7 @@ def streaming_voice_pipeline(audio):
         if sources:
             print(f"[VOICE] Sources: {', '.join(sources)}")
 
-        # ── 3. TTS (streaming) ────────────────────────────────────────────
+        #  3. TTS (streaming) 
         # We only measure until the first chunk arrives — that is the true
         # TTS processing latency.  After that, streaming is just playback.
         tts_start = time.time()
@@ -194,11 +150,10 @@ def streaming_voice_pipeline(audio):
                 metrics = _metrics_html(stt_time, agent_time, tts_latency)
                 first_chunk = False
 
-            # Emit metrics alongside every chunk (Gradio replaces the HTML
-            # component in place, so this is cheap and keeps it visible).
+            # Emit metrics alongside every chunk 
             yield chunk, transcription_text, final_text, metrics
 
-        # ── 4. Persist history (uses tts_latency, not full stream time) ───
+        #  4. Persist history (uses tts_latency, not full stream time) 
         save_to_history(query, answer, sources, {
             "stt_time": stt_time,
             "agent_time": agent_time,
@@ -246,7 +201,7 @@ def main(force_reindex: bool = False):
     print("System ready.\n")
 
     voice_interface = get_voice_interface(run_agent)
-    custom_css = _load_css() + _METRICS_CSS
+    custom_css = _load_css() 
 
     with gr.Blocks(
         css=custom_css,

@@ -210,7 +210,7 @@ You MUST call search_spd_tool to answer it. Do not call search_sbc_tool.""")
 def tools_node(state: AgentState):
     """Execute tool calls and track sources."""
     print("[TOOLS] Executing tool calls...")
-    tool_executor = ToolNode(tools)
+    tool_executor = ToolNode(tools) #creates a langgraph tool node
     result = tool_executor.invoke(state)
     print("[TOOLS] Done")
 
@@ -338,7 +338,6 @@ def run_agent(query: str) -> Dict:
         {
           "answer":      str,
           "sources":     List[str],   # deduplicated
-          "token_usage": dict | None,
         }
     """
     print(f"\n{'='*60}")
